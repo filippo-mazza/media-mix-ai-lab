@@ -5,6 +5,8 @@ import pandas as pd
 
 OUTLIER_POSITION = 65
 DEFAULT_SEED = 42
+MAX_WEEKLY_MEDIA_INVESTMENT = 10_000
+OUTLIER_LIFT = 8_000
 
 
 def generate_sample_data(n_weeks: int = 104, seed: int = DEFAULT_SEED) -> pd.DataFrame:
@@ -20,22 +22,23 @@ def generate_sample_data(n_weeks: int = 104, seed: int = DEFAULT_SEED) -> pd.Dat
     rng = np.random.default_rng(seed)
     week = np.arange(n_weeks)
     seasonality = np.sin(2 * np.pi * week / 52)
-    tv = rng.uniform(8_000, 25_000, n_weeks)
-    search = rng.uniform(3_000, 12_000, n_weeks)
-    social = rng.uniform(1_000, 8_000, n_weeks)
+    total_media = np.floor(rng.uniform(3_000, MAX_WEEKLY_MEDIA_INVESTMENT, n_weeks) * 100) / 100
+    channel_mix = rng.dirichlet((4.0, 2.5, 1.5), n_weeks)
+    tv, search = (channel_mix[:, :2] * total_media[:, np.newaxis]).round(2).T
+    social = (total_media - tv - search).round(2)
     price = rng.uniform(90, 110, n_weeks)
     promotions = rng.binomial(1, 0.2, n_weeks)
     revenue = (
-        50_000
-        + 1.4 * tv
-        + 2.0 * search
-        + 1.2 * social
-        - 300 * (price - 100)
-        + 8_000 * promotions
-        + 10_000 * seasonality
-        + rng.normal(0, 2_000, n_weeks)
+        12_000
+        + 0.55 * tv
+        + 0.85 * search
+        + 0.45 * social
+        - 90 * (price - 100)
+        + 1_500 * promotions
+        + 2_000 * seasonality
+        + rng.normal(0, 500, n_weeks)
     )
-    revenue[OUTLIER_POSITION] += 60_000
+    revenue[OUTLIER_POSITION] += OUTLIER_LIFT
     return pd.DataFrame(
         {
             "date": pd.date_range("2023-01-02", periods=n_weeks, freq="W-MON"),

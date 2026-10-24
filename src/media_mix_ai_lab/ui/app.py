@@ -144,10 +144,11 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
         else:
             st.markdown(
                 "Synthetic sample: 104 Monday observations starting 2023-01-02; fixed seed "
-                "**42**. Revenue and TV/Search/Social spend use arbitrary currency units. "
+                "**42**. Revenue and TV/Search/Social spend use arbitrary currency units; "
+                "combined weekly media investment is capped at 10,000. "
                 "Price index is centered around 100; promotions are binary; seasonality is "
                 "an annual sine wave. **is_injected_outlier** labels a deliberately added "
-                "60,000-unit revenue spike at row 65 (zero-based). All rows remain intact."
+                "8,000-unit revenue spike at row 65 (zero-based). All rows remain intact."
             )
         st.write(
             {

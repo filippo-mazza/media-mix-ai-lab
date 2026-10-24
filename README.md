@@ -104,9 +104,11 @@ datasets are outside this workspace's scope.
 
 The included sample has 104 weekly observations from January 2023, with arbitrary
 currency-unit revenue, TV/Search/Social spend, price index, binary promotions,
-and annual seasonality. NumPy seed **42** makes it reproducible. A deliberately
-injected 60,000-unit revenue spike at row 65 (zero-based) is explicitly labelled
-and retained. The data is synthetic and cannot support business conclusions.
+and annual seasonality. Combined weekly media investment is capped at **10,000**
+units, with modest synthetic channel returns. NumPy seed **42** makes it
+reproducible. A deliberately injected 8,000-unit revenue spike at row 65
+(zero-based) is explicitly labelled and retained. The data is synthetic and
+cannot support business conclusions.
 
 Regenerate the committed CSV from the repository root:
 
