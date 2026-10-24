@@ -15,9 +15,9 @@ Experiments may involve different model families (for example, **Astra**) and di
 ## Status and stack
 
 The foundation is a working Streamlit workbench with synthetic data exploration
-and transparent linear/log-log OLS fitting. Uploads, AI conversations, and ROI
-estimation are not implemented. No credentials, external services, or paid APIs
-are required.
+and an in-session weekly CSV workspace, plus transparent linear/log-log OLS
+fitting. AI conversations and ROI estimation are not implemented. No credentials,
+external services, or paid APIs are required.
 
 Python **3.12**, Streamlit, Plotly, Pandas, NumPy, Statsmodels, SciPy,
 Scikit-learn, and Pydantic form the application stack. **uv** manages dependencies
@@ -37,9 +37,10 @@ uv run streamlit run app.py
 `uv sync` also works; `--locked` ensures dependency declarations match `uv.lock`.
 The app starts on Home with a sample already loaded. Choose **Explore** in the
 sidebar to inspect weekly revenue, channel spend, and controls using interactive
-Plotly charts. **Data** shows the complete table and offers a CSV download.
-The **Models** section fits OLS or strict log-log OLS and lets you download each
-fit with its specification and provenance as JSON.
+Plotly charts. **Data** shows the complete table, offers a CSV download, and
+accepts a weekly CSV with explicit date, target, channel, and optional control
+mapping. The **Models** section fits OLS or strict log-log OLS and lets you
+download each fit with its specification and provenance as JSON.
 
 ```sh
 uv run pytest
@@ -96,13 +97,34 @@ Outliers are never silently removed; validation rejects invalid inputs without
 cleaning or mutating them. Correlation is not causal attribution, and observed
 revenue/spend must not be presented as incremental advertising ROI.
 
+## Uploaded weekly datasets
+
+On **Data**, upload a UTF-8 CSV with a header row, select its date and numeric
+target columns, map at least one numeric channel, and optionally map numeric
+controls. Dates must be valid, unique, ascending, and exactly seven days apart;
+the selected frequency is weekly. The upload must already be in weekly order:
+the app does not sort or fill gaps. Numeric missing values are retained and
+reported, and appear as chart gaps; zero values are counted but are not treated
+as missing. Infinite values and nonnumeric mapped columns are rejected. No
+imputation, row removal, or other cleaning is performed.
+
+The data page reports each source column's mapped role, missing count, and zero
+count. Provenance displays the uploaded filename, row and column counts, mapping,
+and SHA-256 of the original CSV bytes. Uploaded data remains in the current
+Streamlit session and is not sent to an external service or persisted by the app.
+The download contains the current table, with the selected date column parsed as
+dates. Daily/monthly frequencies, user-selected cleaning, and persistent
+datasets are outside this workspace's scope.
+
 ## Synthetic data
 
 The included sample has 104 weekly observations from January 2023, with arbitrary
 currency-unit revenue, TV/Search/Social spend, price index, binary promotions,
-and annual seasonality. NumPy seed **42** makes it reproducible. A deliberately
-injected 60,000-unit revenue spike at row 65 (zero-based) is explicitly labelled
-and retained. The data is synthetic and cannot support business conclusions.
+and annual seasonality. Combined weekly media investment is capped at **10,000**
+units, with modest synthetic channel returns. NumPy seed **42** makes it
+reproducible. A deliberately injected 8,000-unit revenue spike at row 65
+(zero-based) is explicitly labelled and retained. The data is synthetic and
+cannot support business conclusions.
 
 Regenerate the committed CSV from the repository root:
 
@@ -138,7 +160,6 @@ and uses the lockfile with the selected Python version.
 
 ## Next development stories
 
-- CSV import with explicit schema mapping and transparent validation reports.
 - Chronological validation for OLS fits.
 - Residual, influence, and multicollinearity diagnostics with visible outlier handling.
 - Tested adstock/log transforms before response curves or constrained optimization.
