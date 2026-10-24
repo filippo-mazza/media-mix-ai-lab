@@ -93,6 +93,25 @@ def test_log_log_rejects_nonpositive_outcome_and_media_with_counts_and_examples(
         OLSModelEngine().fit(frame, config)
 
 
+def test_log_log_rejects_transformed_media_name_colliding_with_a_control():
+    frame = pd.DataFrame(
+        {
+            "revenue": [3.0, 5.0, 7.0, 11.0],
+            "tv_spend": [1.0, 2.0, 4.0, 8.0],
+            "log(tv_spend)": [4.0, 3.0, 6.0, 5.0],
+        }
+    )
+    config = ModelConfig(
+        kind="log_log",
+        target="revenue",
+        channels=("tv_spend",),
+        controls=("log(tv_spend)",),
+    )
+
+    with pytest.raises(ValueError, match="Transformed media predictor names collide"):
+        OLSModelEngine().fit(frame, config)
+
+
 def test_ols_rejects_rank_deficiency_and_too_few_rows():
     config = ModelConfig(target="revenue", channels=("tv_spend", "search_spend"), controls=())
     rank_deficient = pd.DataFrame(

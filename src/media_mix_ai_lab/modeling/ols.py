@@ -39,6 +39,13 @@ class OLSModelEngine:
                 raise ValueError(f"{column} must contain numeric, finite, nonmissing values.")
 
         if config.kind == "log_log":
+            transformed_channels = [f"log({column})" for column in config.channels]
+            collisions = set(transformed_channels).intersection(config.controls)
+            if collisions:
+                raise ValueError(
+                    "Transformed media predictor names collide with selected controls: "
+                    f"{', '.join(sorted(collisions))}. Rename the conflicting columns."
+                )
             self._validate_log_domain(data, config)
             y = np.log(data[config.target].astype(float)).rename(f"log({config.target})")
             design = pd.DataFrame(index=data.index)

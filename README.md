@@ -71,24 +71,51 @@ data/samples/                  Public synthetic CSV and its provenance
 .github/workflows/ci.yml        Reproducible quality checks
 ```
 
-The OLS engine fits the selected outcome against media predictors and optional
-controls with an explicit intercept choice. Linear OLS uses values in their
-original units. Strict log-log OLS takes natural logs of the outcome and media
-predictors, while selected controls remain in levels; nonpositive outcome or
-media values are rejected with counts and examples, never dropped or adjusted.
-Each downloaded result includes coefficients, classical standard errors and
-95% confidence intervals, sample size, R², adjusted R², residual variance,
-equation, transformations, dataset fingerprint, configuration, and package
-versions.
+## How OLS fitting works
 
-These are unweighted, in-sample OLS estimates, not causal effects. Log-log media
-slopes are conditional elasticities, not ROI. Classical inference assumes a
-correctly specified model with independent, homoskedastic errors; weekly
-dependence, omitted confounders, and influential observations can invalidate
-the estimates or intervals. Values retain their input units, and level-control
-coefficients are conditional on the selected specification. No rows are
-silently cleaned or removed. Adstock, temporal validation, and response curves
-are not implemented. Numerical results remain separate from AI interpretations.
+On **Models**, choose the outcome, mapped media predictors, optional controls,
+model family, and whether to include an intercept. Linear OLS fits
+`outcome = intercept + Σ(media coefficient × media) + Σ(control coefficient × control) + error`
+using each selected column in its original units. Statsmodels estimates the
+coefficients by minimizing the sum of squared residuals. The optional intercept
+is included as a constant design-matrix column; when omitted, R² follows
+statsmodels' uncentered convention.
+
+Strict log-log OLS instead fits
+`log(outcome) = intercept + Σ(media coefficient × log(media)) + Σ(control coefficient × control) + error`.
+Natural logarithms are applied only to the outcome and selected media columns.
+Controls remain in their original units. The outcome and every logged media
+observation must be strictly positive; a fit rejects nonpositive values with
+counts and row/date examples. It never uses `log1p`, adds an epsilon, or drops
+observations. The selected outcome and predictors must also be numeric, finite,
+and nonmissing. Exact rank deficiency and designs without residual degrees of
+freedom are rejected rather than returning unidentified coefficients.
+
+The result reports estimates, classical standard errors and 95% confidence
+intervals, sample size, R², adjusted R², and residual variance
+(residual sum of squares divided by residual degrees of freedom). It also
+records the fitted equation, exact feature transformations, configuration,
+dataset fingerprint, and Python/numerical package versions. Fits are retained in
+the current Streamlit session and can be downloaded as JSON.
+
+## Statistical assumptions and limitations
+
+These are unweighted, in-sample OLS estimates of conditional associations, not
+causal effects. The model assumes the conditional mean is correctly specified
+and linear in its coefficients. Classical standard errors and confidence
+intervals rely on independent, homoskedastic errors (and normal errors for
+exact finite-sample t inference); weekly autocorrelation, heteroskedasticity,
+omitted confounders, or influential observations can make inference misleading.
+The app does not compute robust or autocorrelation-adjusted standard errors.
+
+Linear-model coefficients are changes in outcome units per one-unit change in
+the corresponding predictor, conditional on the other selected terms. In
+log-log models, media slopes are conditional elasticities: approximately the
+percent change in outcome for a one-percent change in that media predictor,
+holding other terms fixed. They are not ROI or causal lift. Level-control
+coefficients in a log-log model are not elasticities. No rows are silently
+cleaned or removed. Adstock, temporal validation, and response curves are not
+implemented. Numerical results remain separate from AI interpretations.
 The allowlisted AI-facing tool computes descriptive statistics directly from
 validated data; no remote provider, autonomous dispatcher, or generated code
 execution exists.
