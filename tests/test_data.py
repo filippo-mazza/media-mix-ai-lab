@@ -5,7 +5,12 @@ import pandas as pd
 import pytest
 from pandas.testing import assert_frame_equal
 
-from media_mix_ai_lab.data.synthetic import OUTLIER_POSITION, generate_sample_data
+from media_mix_ai_lab.data.synthetic import (
+    MAX_WEEKLY_MEDIA_INVESTMENT,
+    OUTLIER_LIFT,
+    OUTLIER_POSITION,
+    generate_sample_data,
+)
 from media_mix_ai_lab.data.validation import validate_dataset
 
 
@@ -25,18 +30,22 @@ def test_sample_schema_frequency_and_outlier():
     assert (np.diff(frame["date"].to_numpy()) == np.timedelta64(7, "D")).all()
     assert frame["is_injected_outlier"].sum() == 1
     assert frame.loc[OUTLIER_POSITION, "is_injected_outlier"]
+    weekly_media = frame[["tv_spend", "search_spend", "social_spend"]].sum(axis=1)
+    assert weekly_media.max() <= MAX_WEEKLY_MEDIA_INVESTMENT
+    assert weekly_media.max() > 9_500
     baseline = (
-        50_000
-        + 1.4 * frame.tv_spend
-        + 2 * frame.search_spend
-        + 1.2 * frame.social_spend
-        - 300 * (frame.price_index - 100)
-        + 8_000 * frame.promotions
-        + 10_000 * frame.seasonality
+        12_000
+        + 0.55 * frame.tv_spend
+        + 0.85 * frame.search_spend
+        + 0.45 * frame.social_spend
+        - 90 * (frame.price_index - 100)
+        + 1_500 * frame.promotions
+        + 2_000 * frame.seasonality
     )
     residual = frame.revenue - baseline
-    assert residual.iloc[OUTLIER_POSITION] > 50_000
-    assert residual.drop(index=OUTLIER_POSITION).abs().max() < 10_000
+    assert residual.iloc[OUTLIER_POSITION] > OUTLIER_LIFT - 1_500
+    assert residual.drop(index=OUTLIER_POSITION).abs().max() < 2_000
+    assert frame["revenue"].max() < 35_000
 
 
 def test_committed_csv_matches_generator():
