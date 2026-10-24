@@ -1,6 +1,7 @@
 """Streamlit presentation only: deterministic computation lives outside the UI."""
 
 import hashlib
+import html
 
 import pandas as pd
 import plotly.express as px
@@ -19,7 +20,145 @@ from media_mix_ai_lab.data.workspace import (
 from media_mix_ai_lab.modeling.interfaces import ModelResult
 from media_mix_ai_lab.modeling.ols import OLSModelEngine
 
-SECTIONS = ("Home", "Data", "Explore", "Models", "AI Assistant", "ROI Analysis")
+NAVIGATION = (
+    (
+        "Workspace",
+        (
+            ("Home", ":material/home:"),
+            ("Data", ":material/database:"),
+            ("Explore", ":material/monitoring:"),
+        ),
+    ),
+    (
+        "Analysis",
+        (
+            ("Models", ":material/model_training:"),
+            ("AI Assistant", ":material/auto_awesome:"),
+            ("ROI Analysis", ":material/finance_mode:"),
+        ),
+    ),
+)
+
+SIDEBAR_STYLE = """
+<style>
+    [data-testid="stSidebar"] {
+        border-right: 1px solid #d8e2e8;
+    }
+    [data-testid="stSidebar"] [data-testid="stButton"] button {
+        min-height: 2.7rem;
+        justify-content: flex-start;
+        border-radius: 0.7rem;
+        font-weight: 600;
+        padding-left: 0.85rem;
+        transition: background-color 120ms ease, border-color 120ms ease;
+    }
+    [data-testid="stSidebar"] [data-testid="stButton"] button[kind="tertiary"] {
+        color: #344563;
+    }
+    [data-testid="stSidebar"] [data-testid="stButton"] button[kind="tertiary"]:hover {
+        background: #e2edf0;
+        color: #075f69;
+    }
+    .lab-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        margin: 0.1rem 0 1.35rem;
+    }
+    .lab-mark {
+        display: grid;
+        place-items: center;
+        width: 2.35rem;
+        height: 2.35rem;
+        border-radius: 0.75rem;
+        color: white;
+        background: linear-gradient(145deg, #087e8b, #075f69);
+        font-size: 1.2rem;
+        box-shadow: 0 6px 16px rgba(8, 126, 139, 0.2);
+    }
+    .lab-name {
+        color: #172b4d;
+        font-size: 1.05rem;
+        font-weight: 750;
+        line-height: 1.15;
+    }
+    .lab-version {
+        color: #6b7c93;
+        font-size: 0.68rem;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        margin-top: 0.18rem;
+    }
+    .dataset-card {
+        background: rgba(255, 255, 255, 0.62);
+        border: 1px solid #d8e2e8;
+        border-radius: 0.75rem;
+        color: #344563;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        padding: 0.75rem 0.85rem;
+    }
+    .dataset-card strong {
+        color: #172b4d;
+        display: block;
+        font-size: 0.82rem;
+        margin-bottom: 0.1rem;
+        overflow-wrap: anywhere;
+    }
+</style>
+"""
+
+
+def _navigate(section: str) -> None:
+    """Persist the active page across Streamlit reruns."""
+    st.session_state["active_section"] = section
+
+
+def sidebar_navigation(source: dict[str, str | int], row_count: int) -> str:
+    """Render the branded navigation rail and return the active section."""
+    if "active_section" not in st.session_state:
+        st.session_state["active_section"] = "Home"
+    section = st.session_state["active_section"]
+    with st.sidebar:
+        st.markdown(SIDEBAR_STYLE, unsafe_allow_html=True)
+        st.markdown(
+            """
+            <div class="lab-brand">
+                <div class="lab-mark">∿</div>
+                <div>
+                    <div class="lab-name">Media Mix AI Lab</div>
+                    <div class="lab-version">EXPERIMENTAL · v0.1</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        for group, items in NAVIGATION:
+            st.caption(group.upper())
+            for label, icon in items:
+                st.button(
+                    label,
+                    key=f"nav_{label.lower().replace(' ', '_')}",
+                    icon=icon,
+                    type="primary" if section == label else "tertiary",
+                    use_container_width=True,
+                    on_click=_navigate,
+                    args=(label,),
+                )
+            st.write("")
+        st.divider()
+        kind = "Synthetic sample · seed 42" if source["kind"] == "synthetic" else "Uploaded CSV"
+        filename = html.escape(str(source["filename"]))
+        st.caption("ACTIVE DATASET")
+        st.markdown(
+            '<div class="dataset-card">'
+            f"<strong>{filename}</strong>"
+            f"{row_count:,} weekly rows<br>{kind}"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Python computes · AI interprets")
+    return section
 
 
 def home() -> None:
@@ -360,17 +499,12 @@ def roi() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Media Mix AI Lab", page_icon="🔬", layout="wide")
-    with st.sidebar:
-        st.title("Media Mix AI Lab")
-        st.caption("EXPERIMENTAL · v0.1")
-        section = st.radio("Workbench", SECTIONS)
-        st.divider()
-        st.caption("Synthetic dataset · seed 42\nPython computes. AI interprets.")
     if "dataset" not in st.session_state:
         _load_sample()
     frame = st.session_state["dataset"]
     mapping = st.session_state["dataset_mapping"]
     source = st.session_state["dataset_source"]
+    section = sidebar_navigation(source, len(frame))
     try:
         if source["kind"] == "upload":
             validate_weekly_dataset(frame, mapping)
