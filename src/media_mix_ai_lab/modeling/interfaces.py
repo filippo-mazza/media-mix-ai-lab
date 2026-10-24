@@ -9,16 +9,22 @@ from media_mix_ai_lab.core.config import ModelConfig
 
 
 class ModelResult(BaseModel):
-    """Numerical output plus provenance, separate from AI interpretation.
-
-    Implementations must persist the exact input snapshot or its content hash,
-    configuration, and runtime versions alongside results.
-    """
+    """OLS estimates and provenance, separate from AI interpretation."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     config: ModelConfig
     dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     coefficients: dict[str, FiniteFloat]
+    standard_errors: dict[str, FiniteFloat]
+    confidence_intervals: dict[str, tuple[FiniteFloat, FiniteFloat]]
+    term_roles: dict[str, str]
+    sample_size: int = Field(ge=1)
+    r_squared: FiniteFloat
+    adjusted_r_squared: FiniteFloat
+    residual_variance: FiniteFloat
+    equation: str
+    transformations: dict[str, str]
+    package_versions: dict[str, str]
     warnings: tuple[str, ...] = ()
 
 

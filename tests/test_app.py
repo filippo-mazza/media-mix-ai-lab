@@ -49,6 +49,28 @@ def test_workbench_sections_render_without_credentials(section):
         assert not app.exception
 
 
+def test_models_fit_and_save_a_result():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Models")
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert app.session_state["model_results"]
+    assert any(metric.label == "Sample size" for metric in app.metric)
+    assert any(button.label == "Save result as JSON" for button in app.get("download_button"))
+
+
+def test_models_report_strict_log_domain_errors():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Models")
+    app.selectbox[0].set_value("log_log").run()
+    app.session_state["dataset"].loc[0, "tv_spend"] = 0
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert "tv_spend: 1 nonpositive value" in app.error[0].value
+
+
 def test_invalid_dataset_has_actionable_recovery():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.session_state["dataset"] = app.session_state["dataset"].drop(columns="revenue")
@@ -63,7 +85,13 @@ def test_invalid_dataset_has_actionable_recovery():
 def test_csv_upload_mapping_provenance_and_exploration():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     navigate(app, "Data")
-    content = b"date,sales,search,is_injected_outlier\n2024-01-01,10,0,0\n2024-01-08,12,2,1\n"
+    content = (
+        b"date,sales,search,is_injected_outlier\n"
+        b"2024-01-01,10,0,0\n"
+        b"2024-01-08,12,2,0\n"
+        b"2024-01-15,13,1,0\n"
+        b"2024-01-22,16,4,1\n"
+    )
     app.get("file_uploader")[0].set_value(("weekly.csv", content, "text/csv")).run()
     assert not app.exception
     app.multiselect[0].set_value(["search"])
@@ -75,8 +103,13 @@ def test_csv_upload_mapping_provenance_and_exploration():
     assert app.session_state["dataset_source"]["sha256"]
     assert app.session_state["dataset_mapping"]["target"] == "sales"
     assert app.session_state["dataset_mapping"]["channels"] == ("search",)
-    assert len(app.session_state["dataset"]) == 2
+    assert len(app.session_state["dataset"]) == 4
 
     navigate(app, "Explore")
     assert not app.exception
     assert len(app.get("plotly_chart")) == 1
+
+    navigate(app, "Models")
+    app.button[0].click().run()
+    assert not app.exception
+    assert app.session_state["model_results"]

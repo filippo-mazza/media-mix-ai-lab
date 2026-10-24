@@ -15,9 +15,9 @@ Experiments may involve different model families (for example, **Astra**) and di
 ## Status and stack
 
 The foundation is a working Streamlit workbench with synthetic data exploration
-and an in-session weekly CSV workspace. Model fitting, AI conversations, and ROI
-estimation are deliberately not implemented. No credentials, external services,
-or paid APIs are required.
+and an in-session weekly CSV workspace, plus transparent linear/log-log OLS
+fitting. AI conversations and ROI estimation are not implemented. No credentials,
+external services, or paid APIs are required.
 
 Python **3.12**, Streamlit, Plotly, Pandas, NumPy, Statsmodels, SciPy,
 Scikit-learn, and Pydantic form the application stack. **uv** manages dependencies
@@ -39,8 +39,8 @@ The app starts on Home with a sample already loaded. Choose **Explore** in the
 sidebar to inspect weekly revenue, channel spend, and controls using interactive
 Plotly charts. **Data** shows the complete table, offers a CSV download, and
 accepts a weekly CSV with explicit date, target, channel, and optional control
-mapping. The remaining sections explain the planned workflow without fabricating
-results.
+mapping. The **Models** section fits OLS or strict log-log OLS and lets you
+download each fit with its specification and provenance as JSON.
 
 ```sh
 uv run pytest
@@ -50,7 +50,8 @@ uv run ruff format --check .
 
 CI runs the locked install, lint, formatting check, and tests on Python 3.12.
 Tests exercise data reproducibility, schema errors, preservation of inputs,
-configuration validation, typed summary tools, and all six Streamlit sections.
+configuration validation, OLS coefficient recovery and error cases, typed
+summary tools, and all six Streamlit sections.
 
 ## Architecture
 
@@ -60,7 +61,7 @@ src/media_mix_ai_lab/
   ui/                          Presentation and navigation
   data/                        Deterministic generation and nonmutating validation
   core/                        Serializable Pydantic model specifications
-  modeling/                    Future engine protocol and numerical result contract
+  modeling/                    OLS engine, future engine protocol, and result contract
   diagnostics/                 Reserved for statistical diagnostic tools
   optimization/                Reserved for response curves and budget optimization
   ai/                          Provider-neutral conversation and typed tool contracts
@@ -70,12 +71,54 @@ data/samples/                  Public synthetic CSV and its provenance
 .github/workflows/ci.yml        Reproducible quality checks
 ```
 
-The initial model specification reserves OLS/log-log families, adstock, and
-external controls. It does **not** fit models or apply transformations yet.
-Numerical results are separate from AI interpretations. Future engines must
-retain dataset provenance, configurations, and runtime versions. The one initial
-allowlisted AI-facing tool computes descriptive statistics directly from validated
-data. No remote provider, autonomous dispatcher, or generated code execution exists.
+## How OLS fitting works
+
+On **Models**, choose the outcome, mapped media predictors, optional controls,
+model family, and whether to include an intercept. Linear OLS fits
+`outcome = intercept + Σ(media coefficient × media) + Σ(control coefficient × control) + error`
+using each selected column in its original units. Statsmodels estimates the
+coefficients by minimizing the sum of squared residuals. The optional intercept
+is included as a constant design-matrix column; when omitted, R² follows
+statsmodels' uncentered convention.
+
+Strict log-log OLS instead fits
+`log(outcome) = intercept + Σ(media coefficient × log(media)) + Σ(control coefficient × control) + error`.
+Natural logarithms are applied only to the outcome and selected media columns.
+Controls remain in their original units. The outcome and every logged media
+observation must be strictly positive; a fit rejects nonpositive values with
+counts and row/date examples. It never uses `log1p`, adds an epsilon, or drops
+observations. The selected outcome and predictors must also be numeric, finite,
+and nonmissing. Exact rank deficiency and designs without residual degrees of
+freedom are rejected rather than returning unidentified coefficients.
+
+The result reports estimates, classical standard errors and 95% confidence
+intervals, sample size, R², adjusted R², and residual variance
+(residual sum of squares divided by residual degrees of freedom). It also
+records the fitted equation, exact feature transformations, configuration,
+dataset fingerprint, and Python/numerical package versions. Fits are retained in
+the current Streamlit session and can be downloaded as JSON.
+
+## Statistical assumptions and limitations
+
+These are unweighted, in-sample OLS estimates of conditional associations, not
+causal effects. The model assumes the conditional mean is correctly specified
+and linear in its coefficients. Classical standard errors and confidence
+intervals rely on independent, homoskedastic errors (and normal errors for
+exact finite-sample t inference); weekly autocorrelation, heteroskedasticity,
+omitted confounders, or influential observations can make inference misleading.
+The app does not compute robust or autocorrelation-adjusted standard errors.
+
+Linear-model coefficients are changes in outcome units per one-unit change in
+the corresponding predictor, conditional on the other selected terms. In
+log-log models, media slopes are conditional elasticities: approximately the
+percent change in outcome for a one-percent change in that media predictor,
+holding other terms fixed. They are not ROI or causal lift. Level-control
+coefficients in a log-log model are not elasticities. No rows are silently
+cleaned or removed. Adstock, temporal validation, and response curves are not
+implemented. Numerical results remain separate from AI interpretations.
+The allowlisted AI-facing tool computes descriptive statistics directly from
+validated data; no remote provider, autonomous dispatcher, or generated code
+execution exists.
 
 Outliers are never silently removed; validation rejects invalid inputs without
 cleaning or mutating them. Correlation is not causal attribution, and observed
@@ -144,7 +187,7 @@ and uses the lockfile with the selected Python version.
 
 ## Next development stories
 
-- OLS fitting with temporal holdout, controls, persisted configuration and provenance.
+- Chronological validation for OLS fits.
 - Residual, influence, and multicollinearity diagnostics with visible outlier handling.
 - Tested adstock/log transforms before response curves or constrained optimization.
 - Provider adapter and reviewed tool dispatch, with grounded interpretations and
