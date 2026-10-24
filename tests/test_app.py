@@ -32,6 +32,28 @@ def test_workbench_sections_render_without_credentials(section):
         assert not app.exception
 
 
+def test_models_fit_and_save_a_result():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.sidebar.radio[0].set_value("Models").run()
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert app.session_state["model_results"]
+    assert any(metric.label == "Sample size" for metric in app.metric)
+    assert any(button.label == "Save result as JSON" for button in app.get("download_button"))
+
+
+def test_models_report_strict_log_domain_errors():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.sidebar.radio[0].set_value("Models").run()
+    app.selectbox[0].set_value("log_log").run()
+    app.session_state["dataset"].loc[0, "tv_spend"] = 0
+    app.button[0].click().run()
+
+    assert not app.exception
+    assert "tv_spend: 1 nonpositive value" in app.error[0].value
+
+
 def test_invalid_dataset_has_actionable_recovery():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.session_state["dataset"] = app.session_state["dataset"].drop(columns="revenue")

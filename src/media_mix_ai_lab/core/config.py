@@ -1,4 +1,4 @@
-"""Serializable, validated specifications for reproducible future models."""
+"""Serializable, validated specifications for reproducible models."""
 
 from typing import Literal
 
@@ -6,10 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ModelConfig(BaseModel):
-    """A specification only; fitting is deliberately not implemented yet.
+    """OLS specification, with no implicit cleaning or predictor transforms.
 
-    Lag units are weeks. Model implementations must explicitly apply controls,
-    transforms, and training windows and report their assumptions.
+    Log-log specifications transform the outcome and media channels; selected
+    controls remain in levels. Lag units are weeks and are reserved for future use.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -19,6 +19,7 @@ class ModelConfig(BaseModel):
     target: str = Field(default="revenue", min_length=1)
     channels: tuple[str, ...] = ("tv_spend", "search_spend", "social_spend")
     controls: tuple[str, ...] = ("price_index", "promotions", "seasonality")
+    intercept: bool = True
     adstock_decay: float = Field(default=0.0, ge=0.0, lt=1.0)
     max_lag_weeks: int = Field(default=0, ge=0, le=104)
     seed: int = Field(default=42, ge=0)

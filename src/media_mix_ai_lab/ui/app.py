@@ -7,9 +7,12 @@ import streamlit as st
 from media_mix_ai_lab.core.config import ModelConfig
 from media_mix_ai_lab.data.synthetic import generate_sample_data
 from media_mix_ai_lab.data.validation import validate_dataset
+from media_mix_ai_lab.modeling.interfaces import ModelResult
+from media_mix_ai_lab.modeling.ols import OLSModelEngine
 
 SECTIONS = ("Home", "Data", "Explore", "Models", "AI Assistant", "ROI Analysis")
 SPEND_COLUMNS = ("tv_spend", "search_spend", "social_spend")
+CONTROL_COLUMNS = ("price_index", "promotions", "seasonality")
 
 
 def home() -> None:
@@ -100,19 +103,108 @@ def explore(frame: pd.DataFrame) -> None:
 
 def models() -> None:
     st.title("Models")
-    st.write("Model fitting is planned. This release only previews a validated configuration.")
-    kind = st.selectbox("Planned model family", ["ols", "log_log"])
-    config = ModelConfig(kind=kind)
-    st.json(config.model_dump(mode="json"))
-    st.download_button(
-        "Download configuration", config.model_dump_json(indent=2), "model-config.json"
+    st.write("Fit transparent OLS specifications to the currently loaded dataset.")
+    frame = st.session_state["dataset"]
+    numeric_columns = [
+        column
+        for column in frame.select_dtypes(include="number").columns
+        if column != "is_injected_outlier"
+    ]
+    kind = st.selectbox(
+        "Model specification",
+        ["ols", "log_log"],
+        format_func=lambda value: "Linear OLS" if value == "ols" else "Log-log OLS",
     )
-    st.button("Fit model (coming soon)", disabled=True)
+    target_default = numeric_columns.index("revenue") if "revenue" in numeric_columns else 0
+    target = st.selectbox("Outcome", numeric_columns, index=target_default)
+    media_options = [
+        column for column in numeric_columns if column != target and column not in CONTROL_COLUMNS
+    ]
+    media_default = [column for column in SPEND_COLUMNS if column in media_options]
+    channels = st.multiselect("Media predictors", media_options, default=media_default)
+    control_options = [
+        column for column in CONTROL_COLUMNS if column in numeric_columns and column != target
+    ]
+    controls = st.multiselect(
+        "Optional controls",
+        [column for column in control_options if column not in channels],
+        default=[column for column in control_options if column not in channels],
+    )
+    intercept = st.checkbox("Include intercept", value=True)
+    if st.button("Fit model"):
+        try:
+            config = ModelConfig(
+                kind=kind,
+                target=target,
+                channels=tuple(channels),
+                controls=tuple(controls),
+                intercept=intercept,
+            )
+            result = OLSModelEngine().fit(frame, config)
+            st.session_state.setdefault("model_results", []).append(
+                result.model_dump_json(indent=2)
+            )
+        except ValueError as error:
+            st.error(f"Model fit failed: {error}")
+
+    saved_results = st.session_state.get("model_results", [])
+    if saved_results:
+        st.subheader("Fitted results")
+        for position, result_json in enumerate(reversed(saved_results), start=1):
+            result = ModelResult.model_validate_json(result_json)
+            with st.expander(f"Fit {len(saved_results) - position + 1}", expanded=position == 1):
+                _show_model_result(result)
+                st.download_button(
+                    "Save result as JSON",
+                    result_json,
+                    file_name=f"ols-fit-{result.dataset_sha256[:12]}.json",
+                    mime="application/json",
+                    key=f"download_model_result_{position}",
+                )
     st.caption(
-        "Future work: OLS, log-log models, adstock, controls, temporal validation, "
-        "and diagnostics. "
-        "No coefficients, predictions, or accuracy scores are fabricated."
+        "Log-log models take natural logs of the outcome and media predictors; selected "
+        "controls remain in their original units. No observations are removed. "
+        "Adstock, temporal validation, and response curves are not implemented."
     )
+
+
+def _show_model_result(result: ModelResult) -> None:
+    st.code(result.equation)
+    st.caption(
+        "Features and transformations: "
+        + ", ".join(f"{name}: {transform}" for name, transform in result.transformations.items())
+    )
+    columns = st.columns(4)
+    columns[0].metric("Sample size", result.sample_size)
+    columns[1].metric("R²", f"{result.r_squared:.4f}")
+    columns[2].metric("Adjusted R²", f"{result.adjusted_r_squared:.4f}")
+    columns[3].metric("Residual variance", f"{result.residual_variance:.4g}")
+    coefficients = pd.DataFrame(
+        [
+            {
+                "Term": term,
+                "Role": result.term_roles[term],
+                "Estimate": estimate,
+                "Standard error": result.standard_errors[term],
+                "95% CI lower": result.confidence_intervals[term][0],
+                "95% CI upper": result.confidence_intervals[term][1],
+            }
+            for term, estimate in result.coefficients.items()
+        ]
+    )
+    st.dataframe(coefficients, hide_index=True, width="stretch")
+    if result.config.kind == "log_log":
+        st.caption("Log-log media slopes are conditional elasticities, not causal ROI.")
+    for warning in result.warnings:
+        st.warning(warning)
+    with st.expander("Model specification and provenance"):
+        st.json(
+            {
+                "specification": result.config.model_dump(mode="json"),
+                "dataset_sha256": result.dataset_sha256,
+                "package_versions": result.package_versions,
+            }
+        )
 
 
 def assistant() -> None:
