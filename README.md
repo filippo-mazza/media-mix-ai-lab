@@ -14,9 +14,10 @@ Experiments may involve different model families (for example, **Astra**) and di
 
 ## Status and stack
 
-The foundation is a working Streamlit workbench with synthetic data exploration.
-Model fitting, uploads, AI conversations, and ROI estimation are deliberately
-not implemented. No credentials, external services, or paid APIs are required.
+The foundation is a working Streamlit workbench with synthetic data exploration
+and an in-session weekly CSV workspace. Model fitting, AI conversations, and ROI
+estimation are deliberately not implemented. No credentials, external services,
+or paid APIs are required.
 
 Python **3.12**, Streamlit, Plotly, Pandas, NumPy, Statsmodels, SciPy,
 Scikit-learn, and Pydantic form the application stack. **uv** manages dependencies
@@ -36,8 +37,10 @@ uv run streamlit run app.py
 `uv sync` also works; `--locked` ensures dependency declarations match `uv.lock`.
 The app starts on Home with a sample already loaded. Choose **Explore** in the
 sidebar to inspect weekly revenue, channel spend, and controls using interactive
-Plotly charts. **Data** shows the complete table and offers a CSV download.
-The remaining sections explain the planned workflow without fabricating results.
+Plotly charts. **Data** shows the complete table, offers a CSV download, and
+accepts a weekly CSV with explicit date, target, channel, and optional control
+mapping. The remaining sections explain the planned workflow without fabricating
+results.
 
 ```sh
 uv run pytest
@@ -77,6 +80,25 @@ data. No remote provider, autonomous dispatcher, or generated code execution exi
 Outliers are never silently removed; validation rejects invalid inputs without
 cleaning or mutating them. Correlation is not causal attribution, and observed
 revenue/spend must not be presented as incremental advertising ROI.
+
+## Uploaded weekly datasets
+
+On **Data**, upload a UTF-8 CSV with a header row, select its date and numeric
+target columns, map at least one numeric channel, and optionally map numeric
+controls. Dates must be valid, unique, ascending, and exactly seven days apart;
+the selected frequency is weekly. The upload must already be in weekly order:
+the app does not sort or fill gaps. Numeric missing values are retained and
+reported, and appear as chart gaps; zero values are counted but are not treated
+as missing. Infinite values and nonnumeric mapped columns are rejected. No
+imputation, row removal, or other cleaning is performed.
+
+The data page reports each source column's mapped role, missing count, and zero
+count. Provenance displays the uploaded filename, row and column counts, mapping,
+and SHA-256 of the original CSV bytes. Uploaded data remains in the current
+Streamlit session and is not sent to an external service or persisted by the app.
+The download contains the current table, with the selected date column parsed as
+dates. Daily/monthly frequencies, user-selected cleaning, and persistent
+datasets are outside this workspace's scope.
 
 ## Synthetic data
 
@@ -120,7 +142,6 @@ and uses the lockfile with the selected Python version.
 
 ## Next development stories
 
-- CSV import with explicit schema mapping and transparent validation reports.
 - OLS fitting with temporal holdout, controls, persisted configuration and provenance.
 - Residual, influence, and multicollinearity diagnostics with visible outlier handling.
 - Tested adstock/log transforms before response curves or constrained optimization.
