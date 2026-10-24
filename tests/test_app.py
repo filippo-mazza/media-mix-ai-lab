@@ -47,9 +47,10 @@ def test_invalid_dataset_has_actionable_recovery():
 def test_csv_upload_mapping_provenance_and_exploration():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.sidebar.radio[0].set_value("Data").run()
-    content = b"date,sales,search\n2024-01-01,10,0\n2024-01-08,12,2\n"
+    content = b"date,sales,search,is_injected_outlier\n2024-01-01,10,0,0\n2024-01-08,12,2,1\n"
     app.get("file_uploader")[0].set_value(("weekly.csv", content, "text/csv")).run()
     assert not app.exception
+    app.multiselect[0].set_value(["search"])
     submit = next(button for button in app.button if button.label == "Validate and use dataset")
     submit.click().run()
 

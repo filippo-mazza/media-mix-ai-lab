@@ -34,6 +34,11 @@ def test_csv_mapping_preserves_values_and_reports_missing_and_zeros():
         (b"\xff", "UTF-8"),
         (b"week,sales,sales\n2024-01-01,1,2\n", "unique"),
         (b"week,,sales\n2024-01-01,1,2\n", "empty"),
+        (
+            b"week,sales,search\n1,2024-01-01,10,2\n2,2024-01-08,12,3\n",
+            "fields; expected",
+        ),
+        (b"week,sales,search\n2024-01-01,10\n", "fields; expected"),
         (b"week,sales\n", "no data rows"),
     ],
 )

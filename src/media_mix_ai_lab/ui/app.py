@@ -174,7 +174,7 @@ def _load_sample() -> None:
     }
 
 
-def explore(frame: pd.DataFrame, mapping: ColumnMapping) -> None:
+def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> None:
     st.title("Explore")
     st.caption("WEEKLY OBSERVATIONS · No fitted model or attribution")
     target = mapping["target"]
@@ -201,7 +201,11 @@ def explore(frame: pd.DataFrame, mapping: ColumnMapping) -> None:
             labels={"value": "Observed value", mapping["date"]: "Week"},
             color_discrete_sequence=["#087e8b", "#d97706", "#6554c0", "#2a9d8f"],
         )
-        if "is_injected_outlier" in frame.columns and frame["is_injected_outlier"].any():
+        if (
+            source_kind == "synthetic"
+            and "is_injected_outlier" in frame.columns
+            and frame["is_injected_outlier"].any()
+        ):
             outlier_date = frame.loc[frame["is_injected_outlier"], mapping["date"]].iloc[0]
             chart.add_vline(
                 x=outlier_date.timestamp() * 1000, line_dash="dot", line_color="#b42318"
@@ -210,7 +214,7 @@ def explore(frame: pd.DataFrame, mapping: ColumnMapping) -> None:
         st.plotly_chart(chart, width="stretch")
     else:
         st.info("Select at least one series to display the chart.")
-    if "is_injected_outlier" in frame.columns:
+    if source_kind == "synthetic" and "is_injected_outlier" in frame.columns:
         st.caption("Dotted red line: deliberately injected outlier; no observations removed.")
     if mapping["controls"]:
         control = st.selectbox("Inspect a control", list(mapping["controls"]))
@@ -286,7 +290,7 @@ def main() -> None:
     elif section == "Data":
         data_page(frame, mapping, source)
     elif section == "Explore":
-        explore(frame, mapping)
+        explore(frame, mapping, source["kind"])
     elif section == "Models":
         models()
     elif section == "AI Assistant":

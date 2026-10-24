@@ -24,15 +24,22 @@ def read_csv_upload(content: bytes) -> pd.DataFrame:
     except UnicodeDecodeError as error:
         raise ValueError("CSV files must use UTF-8 encoding.") from error
     try:
-        header = next(csv.reader(io.StringIO(text), strict=True), None)
+        records = csv.reader(io.StringIO(text), strict=True)
+        header = next(records, None)
+        if not header:
+            raise ValueError("The uploaded CSV must include a header row.")
+        if any(not name.strip() for name in header):
+            raise ValueError("CSV column names cannot be empty.")
+        if len(header) != len(set(header)):
+            raise ValueError("CSV column names must be unique.")
+        for record in records:
+            if record and len(record) != len(header):
+                raise ValueError(
+                    f"CSV record ending on line {records.line_num} has {len(record)} "
+                    f"fields; expected {len(header)}."
+                )
     except csv.Error as error:
-        raise ValueError(f"Could not parse CSV header: {error}") from error
-    if not header:
-        raise ValueError("The uploaded CSV must include a header row.")
-    if any(not name.strip() for name in header):
-        raise ValueError("CSV column names cannot be empty.")
-    if len(header) != len(set(header)):
-        raise ValueError("CSV column names must be unique.")
+        raise ValueError(f"Could not parse CSV: {error}") from error
     try:
         frame = pd.read_csv(io.StringIO(text))
     except pd.errors.EmptyDataError as error:
