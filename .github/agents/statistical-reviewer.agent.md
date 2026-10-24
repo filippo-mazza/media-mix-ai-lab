@@ -1,4 +1,3 @@
-
 ---
 name: Statistical Reviewer
 description: Reviews Media Mix Modeling implementations for mathematical correctness, reproducibility, and misleading statistical claims.
