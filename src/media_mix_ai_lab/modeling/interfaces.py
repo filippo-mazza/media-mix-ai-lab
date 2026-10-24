@@ -3,12 +3,48 @@
 from typing import Annotated, Literal, Protocol
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from media_mix_ai_lab.core.config import ModelConfig
 
 PValue = Annotated[FiniteFloat, Field(ge=0, le=1)]
 SignificanceCode = Literal["***", "**", "*", ".", ""]
+
+
+class AffectedObservation(BaseModel):
+    """One unique input row with at least one value outside the log domain."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    row_position: int = Field(ge=0)
+    date: str | None = None
+    columns: tuple[str, ...]
+
+
+class TransformPolicy(BaseModel):
+    """Explicit transforms by model role and strict log-domain behavior."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    target: str
+    media: dict[str, str]
+    controls: dict[str, str]
+    log_domain_failure: str
+
+
+class ObservationAccounting(BaseModel):
+    """Input eligibility and fit accounting, including the strict transform policy."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    n_input: int = Field(ge=0)
+    n_eligible: int = Field(ge=0)
+    n_fitted: int | None = Field(default=None, ge=0)
+    n_excluded: int | None = Field(default=None, ge=0)
+    nonpositive_target_count: int = Field(ge=0)
+    nonpositive_media_counts: dict[str, int]
+    affected_rows: tuple[AffectedObservation, ...]
+    transform_policy: TransformPolicy
 
 
 class TermAssessment(BaseModel):
@@ -66,6 +102,7 @@ class ModelResult(BaseModel):
     p_values: dict[str, PValue | None]
     significance_codes: dict[str, SignificanceCode]
     term_roles: dict[str, str]
+    observation_accounting: ObservationAccounting
     sample_size: int = Field(ge=1)
     r_squared: FiniteFloat
     adjusted_r_squared: FiniteFloat
@@ -81,6 +118,16 @@ class ModelResult(BaseModel):
     design_rank: int = Field(ge=1)
     parameter_count: int = Field(ge=1)
     warnings: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_observation_counts(self) -> "ModelResult":
+        """Keep successful-fit counts consistent under the current strict policy."""
+        accounting = self.observation_accounting
+        if accounting.n_fitted != self.sample_size:
+            raise ValueError("sample_size must equal observation_accounting.n_fitted")
+        if accounting.n_excluded != 0:
+            raise ValueError("successful strict fits must report n_excluded == 0")
+        return self
 
 
 class ModelEngine(Protocol):

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +9,32 @@ import statsmodels.api as sm
 from media_mix_ai_lab.core.config import ModelConfig
 from media_mix_ai_lab.diagnostics.coefficients import significance_code
 from media_mix_ai_lab.modeling.interfaces import ModelResult
-from media_mix_ai_lab.modeling.ols import OLSModelEngine
+from media_mix_ai_lab.modeling.ols import ModelFitError, OLSModelEngine, summarize_observations
+
+
+def positive_log_fixture() -> pd.DataFrame:
+    tv = np.arange(1.0, 13.0)
+    search = np.array([2, 5, 1, 7, 3, 9, 4, 11, 6, 13, 8, 15], dtype=float)
+    control = np.array([0, 1] * 6)
+    revenue = np.exp(1 + 0.5 * np.log(tv) - 0.2 * np.log(search) + 0.1 * control)
+    return pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=len(tv), freq="7D"),
+            "revenue": revenue,
+            "tv_spend": tv,
+            "search_spend": search,
+            "promotion": control,
+        }
+    )
+
+
+def log_config() -> ModelConfig:
+    return ModelConfig(
+        kind="log_log",
+        target="revenue",
+        channels=("tv_spend", "search_spend"),
+        controls=("promotion",),
+    )
 
 
 def test_linear_ols_recovers_coefficients_and_reproducible_provenance():
@@ -236,7 +262,7 @@ def test_log_log_rejects_nonpositive_outcome_and_media_with_counts_and_examples(
 
     with pytest.raises(ValueError, match=r"revenue: 1 nonpositive.*tv_spend: 2 nonpositive"):
         OLSModelEngine().fit(frame, config)
-    with pytest.raises(ValueError, match="date=Timestamp"):
+    with pytest.raises(ModelFitError, match="date=2024-01-02"):
         OLSModelEngine().fit(frame, config)
 
 
@@ -317,3 +343,95 @@ def test_documented_negative_media_export_matches_result_schema():
     assert result.t_statistics["tv_spend"] == pytest.approx(-1069570957405867.4)
     assert result.p_values["tv_spend"] == pytest.approx(1.0963639480210133e-260)
     assert result.significance_codes["tv_spend"] == "***"
+
+
+def test_valid_log_log_fit_accounts_for_all_observations_in_json():
+    frame = positive_log_fixture()
+    result = OLSModelEngine().fit(frame, log_config())
+    exported = json.loads(result.model_dump_json())
+    restored = ModelResult.model_validate_json(result.model_dump_json())
+
+    accounting = exported["observation_accounting"]
+    assert accounting["n_input"] == len(frame)
+    assert accounting["n_eligible"] == len(frame)
+    assert accounting["n_fitted"] == len(frame)
+    assert accounting["n_excluded"] == 0
+    assert accounting["transform_policy"]["target"] == "natural log"
+    assert accounting["transform_policy"]["controls"]["promotion"] == "original level"
+    assert restored.observation_accounting == result.observation_accounting
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "count_name"),
+    [
+        ("revenue", 0, "nonpositive_target_count"),
+        ("revenue", -1, "nonpositive_target_count"),
+        ("tv_spend", 0, "nonpositive_media_counts"),
+        ("tv_spend", -1, "nonpositive_media_counts"),
+    ],
+)
+def test_strict_log_log_rejects_zero_and_negative_domain_values(column, value, count_name):
+    frame = positive_log_fixture()
+    frame.loc[3, column] = value
+    original = frame.copy(deep=True)
+
+    with pytest.raises(ModelFitError, match="epsilon was added") as error:
+        OLSModelEngine().fit(frame, log_config())
+
+    accounting = error.value.accounting
+    counts = (
+        accounting.nonpositive_target_count
+        if count_name == "nonpositive_target_count"
+        else accounting.nonpositive_media_counts[column]
+    )
+    assert counts == 1
+    assert accounting.n_input == len(frame)
+    assert accounting.n_eligible == len(frame) - 1
+    assert accounting.affected_rows[0].row_position == 3
+    assert accounting.affected_rows[0].date.startswith("2024-01-22")
+    pd.testing.assert_frame_equal(frame, original)
+
+
+def test_overlapping_invalid_values_are_counted_once_and_reviewable():
+    frame = positive_log_fixture()
+    frame.loc[2, "revenue"] = 0
+    frame.loc[2, "tv_spend"] = -1
+    frame.loc[4, "tv_spend"] = 0
+    original = frame.copy(deep=True)
+
+    summary = summarize_observations(frame, log_config())
+    with pytest.raises(ModelFitError) as error:
+        OLSModelEngine().fit(frame, log_config())
+
+    assert summary.nonpositive_target_count == 1
+    assert summary.nonpositive_media_counts == {"tv_spend": 2, "search_spend": 0}
+    assert len(summary.affected_rows) == 2
+    assert summary.affected_rows[0].row_position == 2
+    assert summary.affected_rows[0].columns == ("revenue", "tv_spend")
+    assert summary.affected_rows[1].row_position == 4
+    assert error.value.accounting == summary
+    pd.testing.assert_frame_equal(frame, original)
+
+
+def test_linear_ols_reports_no_exclusions():
+    frame = positive_log_fixture()
+    config = ModelConfig(
+        target="revenue",
+        channels=("tv_spend", "search_spend"),
+        controls=("promotion",),
+    )
+
+    result = OLSModelEngine().fit(frame, config)
+
+    assert result.observation_accounting.n_input == len(frame)
+    assert result.observation_accounting.n_fitted == result.sample_size == len(frame)
+    assert result.observation_accounting.n_excluded == 0
+
+
+def test_result_contract_rejects_inconsistent_observation_counts():
+    result = OLSModelEngine().fit(positive_log_fixture(), log_config())
+    payload = result.model_dump()
+    payload["observation_accounting"]["n_fitted"] -= 1
+
+    with pytest.raises(ValueError, match="sample_size must equal"):
+        ModelResult.model_validate(payload)

@@ -15,8 +15,8 @@ NUMERIC_COLUMNS = (
 REQUIRED_COLUMNS = ("date", *NUMERIC_COLUMNS)
 
 
-def validate_dataset(frame: pd.DataFrame) -> None:
-    """Reject incompatible inputs and leave the caller's frame untouched."""
+def validate_dataset(frame: pd.DataFrame, allow_negative_target_media: bool = False) -> None:
+    """Reject incompatible inputs without mutation; optionally defer negativity to model checks."""
     if frame.empty:
         raise ValueError("The dataset is empty.")
     if not frame.columns.is_unique:
@@ -42,7 +42,10 @@ def validate_dataset(frame: pd.DataFrame) -> None:
             raise ValueError(f"{column} must be numeric.")
         if not np.isfinite(values.to_numpy(dtype=float, na_value=np.nan)).all():
             raise ValueError(f"{column} must contain finite, nonmissing values.")
-    if (frame[["revenue", "tv_spend", "search_spend", "social_spend"]] < 0).any().any():
+    if (
+        not allow_negative_target_media
+        and (frame[["revenue", "tv_spend", "search_spend", "social_spend"]] < 0).any().any()
+    ):
         raise ValueError("Revenue and advertising spend cannot be negative.")
     if (frame["price_index"] <= 0).any():
         raise ValueError("price_index must be positive.")

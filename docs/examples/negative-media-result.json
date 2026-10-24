@@ -37,6 +37,21 @@
   },
   "significance_codes": {"const": "***", "tv_spend": "***"},
   "term_roles": {"const": "intercept", "tv_spend": "media"},
+  "observation_accounting": {
+    "n_input": 20,
+    "n_eligible": 20,
+    "n_fitted": 20,
+    "n_excluded": 0,
+    "nonpositive_target_count": 0,
+    "nonpositive_media_counts": {"tv_spend": 0},
+    "affected_rows": [],
+    "transform_policy": {
+      "target": "original level",
+      "media": {"tv_spend": "original level"},
+      "controls": {},
+      "log_domain_failure": "No logarithmic transforms."
+    }
+  },
   "sample_size": 20,
   "r_squared": 1.0,
   "adjusted_r_squared": 1.0,

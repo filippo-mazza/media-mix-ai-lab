@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -54,7 +55,7 @@ def test_workbench_sections_render_without_credentials(section):
 def test_models_fit_and_save_a_result():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     navigate(app, "Models")
-    app.button[0].click().run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
 
     assert not app.exception
     assert app.session_state["model_results"]
@@ -73,17 +74,31 @@ def test_models_fit_and_save_a_result():
     )
     assert "<0.001" in set(evidence["p-value"])
     assert "***" in set(evidence["Signif."])
+    accounting = result.observation_accounting
+    assert accounting.n_input == accounting.n_fitted == result.sample_size == 104
+    assert accounting.n_excluded == 0
+    assert any("104 input · 104 fitted · 0 excluded" in item.value for item in app.caption)
 
 
 def test_models_report_strict_log_domain_errors():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     navigate(app, "Models")
     app.selectbox[0].set_value("log_log").run()
+    app.session_state["dataset"].loc[0, "revenue"] = 0
     app.session_state["dataset"].loc[0, "tv_spend"] = 0
-    app.button[0].click().run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
 
     assert not app.exception
+    assert "revenue: 1 nonpositive value(s)" in app.error[0].value
     assert "tv_spend: 1 nonpositive value" in app.error[0].value
+    summaries = [json.loads(element.value) for element in app.get("json")]
+    assert any(summary.get("n_eligible") == 103 for summary in summaries)
+    assert any(
+        len(summary.get("affected_rows", [])) == 1
+        and summary["affected_rows"][0]["columns"] == ["revenue", "tv_spend"]
+        for summary in summaries
+    )
+    assert any(element.label == "Review affected source records" for element in app.expander)
 
 
 def test_invalid_dataset_has_actionable_recovery():
