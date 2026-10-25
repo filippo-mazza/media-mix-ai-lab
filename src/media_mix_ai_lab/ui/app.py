@@ -25,6 +25,7 @@ from media_mix_ai_lab.modeling.ols import (
     OLSModelEngine,
     summarize_observations,
 )
+from media_mix_ai_lab.ui.adstock_page import adstock_page
 from media_mix_ai_lab.ui.diagnostics_page import diagnostics_page
 
 NAVIGATION = (
@@ -40,6 +41,7 @@ NAVIGATION = (
         "Analysis",
         (
             ("Models", ":material/model_training:"),
+            ("Adstock Analysis", ":material/show_chart:"),
             ("Diagnostics", ":material/analytics:"),
             ("AI Assistant", ":material/auto_awesome:"),
             ("ROI Analysis", ":material/finance_mode:"),
@@ -285,6 +287,7 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
                     except (TypeError, ValueError) as error:
                         st.error(str(error))
                     else:
+                        _clear_adstock_session()
                         st.session_state["dataset"] = mapped
                         st.session_state["dataset_mapping"] = new_mapping
                         st.session_state["dataset_source"] = {
@@ -332,6 +335,7 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
 
 
 def _load_sample() -> None:
+    _clear_adstock_session()
     st.session_state["dataset"] = generate_sample_data()
     st.session_state["dataset_mapping"] = {
         "date": "date",
@@ -343,6 +347,17 @@ def _load_sample() -> None:
         "kind": "synthetic",
         "filename": "weekly_marketing.csv",
     }
+
+
+def _clear_adstock_session() -> None:
+    """Discard calibration state whenever the active dataset is replaced."""
+    for key in (
+        "adstock_search",
+        "adstock_applied_config",
+        "adstock_exploration",
+        "adstock_final_evaluated_sha256",
+    ):
+        st.session_state.pop(key, None)
 
 
 def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> None:
@@ -397,6 +412,9 @@ def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> No
 
 def models() -> None:
     st.title("Models")
+    if st.button("Open Adstock Analysis"):
+        _navigate("Adstock Analysis")
+        st.rerun()
     st.write("Fit transparent OLS specifications to the currently loaded dataset.")
     frame = st.session_state["dataset"]
     mapping: ColumnMapping = st.session_state["dataset_mapping"]
@@ -542,6 +560,15 @@ def models() -> None:
             media_sign_expectations=sign_expectations,
             adstock=adstock_settings,
         )
+        applied = st.session_state.pop("adstock_applied_config", None)
+        if applied is not None:
+            selected = ModelConfig.model_validate(applied)
+            if (selected.target, selected.channels, selected.date_column) == (
+                config.target,
+                config.channels,
+                config.date_column,
+            ):
+                st.info("Calibrated settings were loaded into the editable controls above.")
         accounting = summarize_observations(frame, config)
     except ValueError as error:
         config = None
@@ -879,7 +906,9 @@ def main() -> None:
         if source["kind"] == "upload":
             validate_weekly_dataset(frame, mapping)
         else:
-            validate_dataset(frame, allow_negative_target_media=section == "Models")
+            validate_dataset(
+                frame, allow_negative_target_media=section in {"Models", "Adstock Analysis"}
+            )
     except ValueError as error:
         st.error(f"Dataset validation failed: {error}")
         st.button("Restore synthetic sample", on_click=_load_sample)
@@ -892,6 +921,8 @@ def main() -> None:
         explore(frame, mapping, source["kind"])
     elif section == "Models":
         models()
+    elif section == "Adstock Analysis":
+        adstock_page()
     elif section == "Diagnostics":
         diagnostics_page()
     elif section == "AI Assistant":

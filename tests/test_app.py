@@ -12,9 +12,10 @@ NAVIGATION_INDEX = {
     "Data": 1,
     "Explore": 2,
     "Models": 3,
-    "Diagnostics": 4,
-    "AI Assistant": 5,
-    "ROI Analysis": 6,
+    "Adstock Analysis": 4,
+    "Diagnostics": 5,
+    "AI Assistant": 6,
+    "ROI Analysis": 7,
 }
 
 
@@ -25,7 +26,16 @@ def navigate(app: AppTest, section: str) -> AppTest:
 
 @pytest.mark.parametrize(
     "section",
-    ["Home", "Data", "Explore", "Models", "Diagnostics", "AI Assistant", "ROI Analysis"],
+    [
+        "Home",
+        "Data",
+        "Explore",
+        "Models",
+        "Adstock Analysis",
+        "Diagnostics",
+        "AI Assistant",
+        "ROI Analysis",
+    ],
 )
 def test_workbench_sections_render_without_credentials(section):
     app = AppTest.from_file(str(APP), default_timeout=20).run()
@@ -52,6 +62,89 @@ def test_workbench_sections_render_without_credentials(section):
     elif section == "Models":
         app.selectbox[0].set_value("log_log").run()
         assert not app.exception
+    elif section == "Adstock Analysis":
+        assert len(app.get("plotly_chart")) == 2
+
+
+def test_adstock_search_and_apply():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Adstock Analysis")
+    assert any(metric.label == "N final test" for metric in app.metric)
+    next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    ).click().run()
+    assert not app.exception
+    assert app.session_state["adstock_search"]["final_test"] is None
+    next(
+        button for button in app.button if button.label == "Evaluate selected model on final test"
+    ).click().run()
+    assert app.session_state["adstock_search"]["final_test"]["rmse"] >= 0
+    assert app.session_state["adstock_final_evaluated_sha256"]
+    assert next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    ).disabled
+    next(
+        button for button in app.button if button.label == "Apply selected parameters"
+    ).click().run()
+    assert app.session_state["adstock_applied_config"]
+
+    navigate(app, "Models")
+    assert "adstock_applied_config" not in app.session_state
+    method = next(item for item in app.selectbox if item.label == "tv_spend adstock method")
+    method.set_value("geometric").run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    result = ModelResult.model_validate_json(app.session_state["model_results"][-1])
+    assert result.config.adstock["tv_spend"].method == "geometric"
+
+
+def test_adstock_search_is_invalidated_when_data_changes():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Adstock Analysis")
+    next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    ).click().run()
+    assert app.session_state["adstock_search"]
+
+    app.session_state["dataset"].loc[0, "revenue"] += 1
+    app.run()
+
+    assert not app.exception
+    assert "adstock_search" not in app.session_state
+    assert any("Search inputs changed" in warning.value for warning in app.warning)
+
+
+def test_adstock_search_is_invalidated_when_search_controls_change():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Adstock Analysis")
+    next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    ).click().run()
+    assert app.session_state["adstock_search"]
+
+    next(item for item in app.selectbox if item.label == "Candidate family").set_value(
+        "delayed_geometric"
+    ).run()
+
+    assert not app.exception
+    assert "adstock_search" not in app.session_state
+    assert any("Search inputs changed" in warning.value for warning in app.warning)
+
+
+def test_adstock_preview_reports_invalid_spend_without_crashing():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.session_state["dataset"].loc[0, "tv_spend"] = float("nan")
+    app.session_state["dataset_source"] = {
+        "kind": "upload",
+        "filename": "missing.csv",
+        "sha256": "test",
+        "rows": 104,
+        "columns": 9,
+    }
+    navigate(app, "Adstock Analysis")
+
+    assert not app.exception
+    assert any("Spend preview unavailable" in warning.value for warning in app.warning)
+    assert any(button.label == "Optimize adstock parameters" for button in app.button)
 
 
 def test_models_fit_and_save_a_result():
@@ -218,7 +311,7 @@ def test_csv_upload_mapping_provenance_and_exploration():
     assert len(app.get("plotly_chart")) == 1
 
     navigate(app, "Models")
-    app.button[0].click().run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
     assert not app.exception
     assert app.session_state["model_results"]
 
