@@ -1,5 +1,6 @@
 """Bounded chronological calibration of deterministic adstock settings."""
 
+from copy import deepcopy
 from itertools import product
 
 import numpy as np
@@ -34,6 +35,12 @@ def candidate_specs(
         raise ValueError("Candidate budget must be between 1 and 100.")
     if method == "none":
         return [{}]
+    minimum_budget = len(channels) + 1 if len(channels) > 1 else 1
+    if budget < minimum_budget:
+        raise ValueError(
+            f"Candidate budget must be at least {minimum_budget} for {len(channels)} channels "
+            "so each channel receives an independent contrast."
+        )
     if method == "geometric":
         grid = [AdstockSpec(method="geometric", alpha=round(i / 10, 1)) for i in range(10)]
     elif method == "delayed_geometric":
@@ -44,29 +51,78 @@ def candidate_specs(
                 theta=theta,
                 max_lag_weeks=max_lag,
             )
-            for i, theta in product(range(1, 10), range(min(4, max_lag) + 1))
+            for i, theta in product(range(1, 10), range(max_lag + 1))
         ]
     else:
         raise ValueError("Unknown adstock family.")
-    total = len(grid) ** len(channels)
-    count = min(budget, total)
-    if count == 1:
-        indices = [(total - 1) // 2]
-    else:
-        indices = [index * (total - 1) // (count - 1) for index in range(count)]
-    candidates = []
-    for candidate_index in indices:
-        settings = []
+    reference = len(grid) // 2
+    combinations: list[tuple[int, ...]] = []
+
+    def add_combination(indices: tuple[int, ...]) -> None:
+        if indices not in combinations and len(combinations) < budget:
+            combinations.append(indices)
+
+    add_combination((reference,) * len(channels))
+    contrast_order = [0, len(grid) - 1, *range(1, len(grid) - 1)]
+    for grid_index in contrast_order:
+        if grid_index == reference:
+            continue
         for channel_index in range(len(channels)):
-            divisor = len(grid) ** (len(channels) - channel_index - 1)
-            settings.append(grid[(candidate_index // divisor) % len(grid)])
-        candidates.append(dict(zip(channels, settings, strict=True)))
+            indices = [reference] * len(channels)
+            indices[channel_index] = grid_index
+            add_combination(tuple(indices))
+            if len(combinations) == budget:
+                break
+        if len(combinations) == budget:
+            break
+
+    total = len(grid) ** len(channels)
+    for sample_index in range(budget * 3):
+        candidate_index = sample_index * (total - 1) // max(budget * 3 - 1, 1)
+        indices = tuple(
+            (candidate_index // (len(grid) ** (len(channels) - index - 1))) % len(grid)
+            for index in range(len(channels))
+        )
+        add_combination(indices)
+    for candidate_index in range(total):
+        if len(combinations) == budget:
+            break
+        indices = tuple(
+            (candidate_index // (len(grid) ** (len(channels) - index - 1))) % len(grid)
+            for index in range(len(channels))
+        )
+        add_combination(indices)
+
+    candidates = [
+        dict(zip(channels, (grid[index] for index in indices), strict=True))
+        for indices in combinations
+    ]
     return candidates
 
 
 def dataset_sha256(data: pd.DataFrame) -> str:
     """Return the same immutable dataset identity used by fitted model results."""
     return OLSModelEngine._fingerprint(data)
+
+
+def search_specification(
+    data: pd.DataFrame,
+    base: ModelConfig,
+    *,
+    method: str,
+    max_lag: int,
+    budget: int,
+    holdout_fraction: float,
+) -> dict:
+    """Describe every input that determines candidate generation and selection."""
+    return {
+        "data_sha256": dataset_sha256(data),
+        "base_config": base.model_dump(mode="json"),
+        "candidate_method": method,
+        "max_lag": max_lag,
+        "candidate_budget": budget,
+        "final_holdout_fraction": holdout_fraction,
+    }
 
 
 def search(
@@ -78,7 +134,7 @@ def search(
     budget: int = 20,
     holdout_fraction: float = 0.2,
 ) -> dict:
-    """Select on validation RMSE and assess the untouched final test once."""
+    """Select on validation RMSE without reading final-test outcomes."""
     fit, validation, test = partition(data, base.date_column, holdout_fraction)
     development = data.iloc[: len(fit) + len(validation)]
     candidates = [{}]
@@ -108,6 +164,7 @@ def search(
                 coefficients=fitted.coefficients,
                 p_values=fitted.p_values,
                 warnings=list(fitted.health_summary.warning_codes),
+                package_versions=fitted.package_versions,
             )
         except (ValueError, np.linalg.LinAlgError) as error:
             row.update(status="failed", reason=str(error))
@@ -120,14 +177,18 @@ def search(
             "No candidate could be fitted; inspect candidate failure reasons and data."
         )
     selected = ranked[0]
-    selected_config = ModelConfig.model_validate(selected["config"])
-    final_fit = OLSModelEngine().fit(development, selected_config)
-    final_design = _design_matrix(data, selected_config).iloc[len(development) :]
-    final_prediction = _predict(final_design, pd.Series(final_fit.coefficients), selected_config)
-    final_metrics = _error_metrics(test[base.target].to_numpy(dtype=float), final_prediction)
+    specification = search_specification(
+        data,
+        base,
+        method=method,
+        max_lag=max_lag,
+        budget=budget,
+        holdout_fraction=holdout_fraction,
+    )
     return {
         "data_sha256": dataset_sha256(data),
-        "method": "chronological fit/validation selection, final test once",
+        "search_specification": specification,
+        "method": "chronological fit/validation selection; final test requires a separate action",
         "normalization": "raw",
         "warm_up": "zero initial state; past observed spend carried across boundaries",
         "partitions": {
@@ -143,9 +204,32 @@ def search(
         "evaluated_candidates": len(rows),
         "baseline": next((row for row in rows if not row["config"]["adstock"]), None),
         "selected": selected,
-        "final_test": final_metrics.model_dump(),
-        "final_test_predictions": final_prediction.tolist(),
-        "package_versions": final_fit.package_versions,
+        "final_test": None,
+        "final_test_predictions": None,
+        "package_versions": selected["package_versions"],
         "caveat": "Selection is predictive, not causal; post-selection p-values are optimistic. "
         "Log-target predictions use exp(log prediction) without smearing correction.",
     }
+
+
+def evaluate_final_test(data: pd.DataFrame, result: dict) -> dict:
+    """Evaluate a frozen selection on its final holdout exactly once per manifest."""
+    if result.get("final_test") is not None:
+        raise ValueError("This search manifest already contains a final-test evaluation.")
+    if result.get("data_sha256") != dataset_sha256(data):
+        raise ValueError("The selected model belongs to a different dataset.")
+    specification = result["search_specification"]
+    base = ModelConfig.model_validate(specification["base_config"])
+    fit, validation, test = partition(
+        data, base.date_column, specification["final_holdout_fraction"]
+    )
+    development = data.iloc[: len(fit) + len(validation)]
+    selected_config = ModelConfig.model_validate(result["selected"]["config"])
+    final_fit = OLSModelEngine().fit(development, selected_config)
+    final_design = _design_matrix(data, selected_config).iloc[len(development) :]
+    final_prediction = _predict(final_design, pd.Series(final_fit.coefficients), selected_config)
+    final_metrics = _error_metrics(test[base.target].to_numpy(dtype=float), final_prediction)
+    evaluated = deepcopy(result)
+    evaluated["final_test"] = final_metrics.model_dump()
+    evaluated["final_test_predictions"] = final_prediction.tolist()
+    return evaluated

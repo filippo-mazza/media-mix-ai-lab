@@ -74,7 +74,15 @@ def test_adstock_search_and_apply():
         button for button in app.button if button.label == "Optimize adstock parameters"
     ).click().run()
     assert not app.exception
+    assert app.session_state["adstock_search"]["final_test"] is None
+    next(
+        button for button in app.button if button.label == "Evaluate selected model on final test"
+    ).click().run()
     assert app.session_state["adstock_search"]["final_test"]["rmse"] >= 0
+    assert app.session_state["adstock_final_evaluated_sha256"]
+    assert next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    ).disabled
     next(
         button for button in app.button if button.label == "Apply selected parameters"
     ).click().run()
@@ -102,7 +110,24 @@ def test_adstock_search_is_invalidated_when_data_changes():
 
     assert not app.exception
     assert "adstock_search" not in app.session_state
-    assert any("different dataset" in warning.value for warning in app.warning)
+    assert any("Search inputs changed" in warning.value for warning in app.warning)
+
+
+def test_adstock_search_is_invalidated_when_search_controls_change():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Adstock Analysis")
+    next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    ).click().run()
+    assert app.session_state["adstock_search"]
+
+    next(item for item in app.selectbox if item.label == "Candidate family").set_value(
+        "delayed_geometric"
+    ).run()
+
+    assert not app.exception
+    assert "adstock_search" not in app.session_state
+    assert any("Search inputs changed" in warning.value for warning in app.warning)
 
 
 def test_adstock_preview_reports_invalid_spend_without_crashing():

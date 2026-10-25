@@ -351,7 +351,12 @@ def _load_sample() -> None:
 
 def _clear_adstock_session() -> None:
     """Discard calibration state whenever the active dataset is replaced."""
-    for key in ("adstock_search", "adstock_applied_config", "adstock_exploration"):
+    for key in (
+        "adstock_search",
+        "adstock_applied_config",
+        "adstock_exploration",
+        "adstock_final_evaluated_sha256",
+    ):
         st.session_state.pop(key, None)
 
 

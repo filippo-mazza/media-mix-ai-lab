@@ -12,8 +12,10 @@ from media_mix_ai_lab.modeling.adstock import adstock_impulse_response, apply_ad
 from media_mix_ai_lab.optimization.adstock_search import (
     candidate_specs,
     dataset_sha256,
+    evaluate_final_test,
     partition,
     search,
+    search_specification,
 )
 
 
@@ -100,6 +102,8 @@ def adstock_page() -> None:
             controls=tuple(mapping["controls"]),
             date_column=mapping["date"],
         )
+        current_sha256 = dataset_sha256(frame)
+        final_test_used = st.session_state.get("adstock_final_evaluated_sha256") == current_sha256
         try:
             fit, validation, test = partition(frame, mapping["date"], holdout)
             cols = st.columns(4)
@@ -122,6 +126,14 @@ def adstock_page() -> None:
                 )
             )
             count = len(candidate_specs(selected_channels, method, horizon, int(budget))) + 1
+            current_specification = search_specification(
+                frame,
+                config,
+                method=method,
+                max_lag=horizon,
+                budget=int(budget),
+                holdout_fraction=holdout,
+            )
             st.caption(
                 f"At most {count} candidate fits including no-adstock baseline. "
                 "Warm-up exclusions: 0; zero prehistory, observed past spend carried across splits."
@@ -129,7 +141,18 @@ def adstock_page() -> None:
         except ValueError as error:
             st.error(str(error))
             return
-        if st.button("Optimize adstock parameters"):
+        result = st.session_state.get("adstock_search")
+        if result and result.get("search_specification") != current_specification:
+            st.session_state.pop("adstock_search", None)
+            st.session_state.pop("adstock_applied_config", None)
+            result = None
+            st.warning("Search inputs changed, so the previous result was cleared.")
+        if final_test_used:
+            st.warning(
+                "The final test has already been used for this dataset. Start with a newly "
+                "loaded dataset before claiming another unbiased final evaluation."
+            )
+        if st.button("Optimize adstock parameters", disabled=final_test_used):
             with st.spinner("Evaluating bounded candidate grid…"):
                 try:
                     st.session_state["adstock_search"] = search(
@@ -140,14 +163,10 @@ def adstock_page() -> None:
                         budget=int(budget),
                         holdout_fraction=holdout,
                     )
+                    st.session_state.pop("adstock_applied_config", None)
+                    result = st.session_state["adstock_search"]
                 except ValueError as error:
                     st.error(f"Search failed: {error}")
-        result = st.session_state.get("adstock_search")
-        if result and result["data_sha256"] != dataset_sha256(frame):
-            st.session_state.pop("adstock_search", None)
-            st.session_state.pop("adstock_applied_config", None)
-            result = None
-            st.warning("The previous search belongs to a different dataset and was cleared.")
         if result:
             st.success("Search complete")
             rows = [
@@ -190,7 +209,23 @@ def adstock_page() -> None:
                 ),
                 width="stretch",
             )
-            st.metric("Final held-out RMSE · selected only", f"{result['final_test']['rmse']:.3f}")
+            if result["final_test"] is None:
+                st.info(
+                    "Selection is frozen from validation results. The final test remains unused."
+                )
+                if st.button("Evaluate selected model on final test"):
+                    try:
+                        result = evaluate_final_test(frame, result)
+                    except ValueError as error:
+                        st.error(f"Final evaluation failed: {error}")
+                    else:
+                        st.session_state["adstock_search"] = result
+                        st.session_state["adstock_final_evaluated_sha256"] = current_sha256
+                        st.rerun()
+            if result["final_test"] is not None:
+                st.metric(
+                    "Final held-out RMSE · selected only", f"{result['final_test']['rmse']:.3f}"
+                )
             st.caption(result["caveat"])
             if st.button("Apply selected parameters"):
                 selected = ModelConfig.model_validate(result["selected"]["config"])

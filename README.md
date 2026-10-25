@@ -84,8 +84,9 @@ data/samples/                  Public synthetic CSV and its provenance
 The **Adstock Analysis** page lets you explore theoretical lag weights and compare
 raw with transformed weekly spend. Its search runs only when requested. It uses
 chronological fit, validation, and final-test periods (60/20/20 by default),
-ranks a bounded candidate grid by validation RMSE, and scores the final test
-once after selection. The downloadable manifest records candidates, errors,
+ranks a bounded candidate grid by validation RMSE, and leaves final-test outcomes
+unread until the analyst explicitly freezes the selection and evaluates it once.
+Further searches on that dataset are then locked. The downloadable manifest records candidates, errors,
 partitions, transforms, and software versions. All transforms use zero
 prehistory and observed past spend across partition boundaries; no warm-up rows
 are removed. Log-target predictions use `exp(predicted log outcome)` without a
