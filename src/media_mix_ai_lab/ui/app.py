@@ -112,11 +112,13 @@ SIDEBAR_STYLE = """
 def _navigate(section: str) -> None:
     """Persist the active page across Streamlit reruns."""
     st.session_state["active_section"] = section
-    st.session_state["collapse_sidebar"] = True
+    st.session_state["collapse_sidebar"] = st.session_state.get("collapse_count", 0) + 1
+    st.session_state["collapse_count"] = st.session_state["collapse_sidebar"]
 
 
 COLLAPSE_SIDEBAR_SCRIPT = """
 <script>
+// navigation #{nonce}: a unique body makes Streamlit re-run the script
 if (window.matchMedia("(max-width: 640px)").matches) {
     setTimeout(() => {
         const button = document.querySelector(
@@ -134,8 +136,10 @@ def sidebar_navigation(source: dict[str, str | int], row_count: int) -> str:
     if "active_section" not in st.session_state:
         st.session_state["active_section"] = "Home"
     section = st.session_state["active_section"]
-    if st.session_state.pop("collapse_sidebar", False):
-        st.html(COLLAPSE_SIDEBAR_SCRIPT, unsafe_allow_javascript=True)
+    if nonce := st.session_state.pop("collapse_sidebar", 0):
+        st.html(
+            COLLAPSE_SIDEBAR_SCRIPT.replace("{nonce}", str(nonce)), unsafe_allow_javascript=True
+        )
     with st.sidebar:
         st.markdown(SIDEBAR_STYLE, unsafe_allow_html=True)
         st.markdown(

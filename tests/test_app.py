@@ -123,3 +123,11 @@ def test_navigation_requests_mobile_sidebar_collapse():
     assert any("stSidebarCollapseButton" in h.proto.body for h in app.get("html"))
     app.run()
     assert not app.get("html")
+
+
+def test_consecutive_navigation_emits_distinct_collapse_scripts():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Data")
+    first = app.get("html")[0].proto.body
+    navigate(app, "Explore")
+    assert app.get("html")[0].proto.body != first
