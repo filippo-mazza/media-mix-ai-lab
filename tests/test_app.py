@@ -113,3 +113,13 @@ def test_csv_upload_mapping_provenance_and_exploration():
     app.button[0].click().run()
     assert not app.exception
     assert app.session_state["model_results"]
+
+
+def test_navigation_requests_mobile_sidebar_collapse():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    assert not app.get("html")
+    navigate(app, "Data")
+    assert not app.exception
+    assert any("stSidebarCollapseButton" in h.proto.body for h in app.get("html"))
+    app.run()
+    assert not app.get("html")

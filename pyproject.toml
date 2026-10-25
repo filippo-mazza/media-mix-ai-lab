@@ -9,7 +9,7 @@ description = "An experimental AI-assisted Media Mix Modeling workbench"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "streamlit>=1.45,<2", "plotly>=6,<7", "pandas>=2.2,<3", "numpy>=2,<3",
+  "streamlit>=1.52,<2", "plotly>=6,<7", "pandas>=2.2,<3", "numpy>=2,<3",
   "statsmodels>=0.14,<0.15", "scipy>=1.15,<2", "scikit-learn>=1.6,<2",
   "pydantic>=2.10,<3",
 ]
