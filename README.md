@@ -307,3 +307,11 @@ and uses the lockfile with the selected Python version.
 ![Model diagnostic warning summary](docs/screenshots/model-diagnostics.png)
 
 ![OLS statistical evidence with p-values](docs/screenshots/model-statistical-evidence.png)
+
+![Model controls with accessible contextual help](docs/screenshots/contextual-help-models-form.png)
+
+![Model statistical results with contextual help](docs/screenshots/contextual-help-model-results.png)
+
+![Adstock controls and charts with contextual help](docs/screenshots/contextual-help-adstock.png)
+
+![Temporal diagnostics and outlier help](docs/screenshots/contextual-help-diagnostics.png)

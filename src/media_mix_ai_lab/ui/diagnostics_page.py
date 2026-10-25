@@ -11,12 +11,20 @@ from media_mix_ai_lab.diagnostics.temporal import (
     same_holdout_period,
 )
 from media_mix_ai_lab.modeling.interfaces import ModelResult
+from media_mix_ai_lab.ui.help_content import HELP_TEXT, help_heading
 
 
 def diagnostics_page() -> None:
     """Evaluate saved model specifications on a user-selected chronological holdout."""
     st.title("Diagnostics")
     st.write("Measure how saved model runs generalize to later weeks.")
+    with st.expander("Influence diagnostics and outlier policy"):
+        help_heading(
+            "Influence measures",
+            "influence_glossary",
+            key="diagnostics_influence_glossary",
+        )
+        st.write(HELP_TEXT["outlier_policy"])
     frame = st.session_state["dataset"]
     mapping = st.session_state["dataset_mapping"]
     model_runs = st.session_state.get("model_results", [])
@@ -32,9 +40,20 @@ def diagnostics_page() -> None:
         f"Fit {index} · {result.config.kind} · {result.dataset_sha256[:8]}"
         for index, result in enumerate(models, start=1)
     ]
-    selected_label = st.selectbox("Stored model run", run_labels)
+    selected_label = st.selectbox(
+        "Stored model run",
+        run_labels,
+        help=(
+            "Select a saved model specification to evaluate on later weeks; this does not refit "
+            "it on holdout outcomes."
+        ),
+    )
     selected_index = run_labels.index(selected_label)
-    split_method = st.selectbox("Holdout selection", ["Holdout fraction", "Date cutoff"])
+    split_method = st.selectbox(
+        "Holdout selection",
+        ["Holdout fraction", "Date cutoff"],
+        help=HELP_TEXT["chronological_split"],
+    )
     split_options: dict[str, object] = {}
     if split_method == "Holdout fraction":
         split_options["holdout_fraction"] = st.slider(
@@ -43,6 +62,7 @@ def diagnostics_page() -> None:
             max_value=0.5,
             value=0.2,
             step=0.05,
+            help=HELP_TEXT["holdout_fraction"],
         )
         split_label = f"{split_options['holdout_fraction']:.0%} holdout"
     else:
@@ -51,6 +71,7 @@ def diagnostics_page() -> None:
             "First holdout week",
             cutoffs,
             format_func=lambda value: value.strftime("%Y-%m-%d"),
+            help=HELP_TEXT["first_holdout_week"],
         )
         split_options["cutoff"] = cutoff
         split_label = f"cutoff {cutoff.strftime('%Y-%m-%d')}"
@@ -80,7 +101,11 @@ def diagnostics_page() -> None:
         f"Evaluation {index} · {item['run_label']} · {item['split_label']}"
         for index, item in enumerate(evaluations, start=1)
     ]
-    st.subheader("Saved holdout evaluations")
+    help_heading(
+        "Saved holdout evaluations",
+        "chronological_split",
+        key="diagnostics_saved_evaluations",
+    )
     latest = len(evaluations) - 1
     display_label = st.selectbox(
         "Evaluation to inspect",
@@ -118,12 +143,12 @@ def diagnostics_page() -> None:
             hide_index=True,
             width="stretch",
         )
+        st.caption(HELP_TEXT["error_metrics"])
 
     st.caption(
-        "WAPE = sum of absolute errors ÷ sum of absolute observed outcomes; it is undefined "
-        "when that denominator is zero. Log-log predictions are exponentiated to outcome "
-        "units and represent a conditional geometric-scale prediction, not an arithmetic-mean "
-        "correction. No causal attribution is estimated."
+        HELP_TEXT["error_metrics"]
+        + " Log-log predictions are exponentiated to outcome units without an "
+        "arithmetic-mean correction. No causal attribution is estimated."
     )
 
 
@@ -134,6 +159,11 @@ def _show_temporal_result(result: TemporalValidationResult, run_label: str) -> N
         f"({result.training_size} weeks) · Holdout: {result.holdout_period[0][:10]} to "
         f"{result.holdout_period[1][:10]} ({result.holdout_size} weeks)"
     )
+    help_heading(
+        "Training and holdout errors",
+        "error_metrics",
+        key="diagnostics_error_metrics",
+    )
     st.write("Errors in outcome units; training and holdout are reported separately.")
     metrics = pd.DataFrame(
         [
@@ -142,6 +172,7 @@ def _show_temporal_result(result: TemporalValidationResult, run_label: str) -> N
         ]
     )
     st.dataframe(metrics, hide_index=True, width="stretch")
+    st.caption(HELP_TEXT["error_metrics"])
 
     predictions = pd.DataFrame(
         [
@@ -167,6 +198,11 @@ def _show_temporal_result(result: TemporalValidationResult, run_label: str) -> N
         title="Holdout: observed vs predicted",
     )
     st.plotly_chart(observed_prediction, width="stretch")
+    help_heading(
+        "Holdout residuals",
+        "residuals",
+        key="diagnostics_holdout_residuals",
+    )
     st.plotly_chart(
         px.line(predictions, x="Week", y="Residual", title="Holdout residuals over time"),
         width="stretch",
@@ -174,22 +210,42 @@ def _show_temporal_result(result: TemporalValidationResult, run_label: str) -> N
 
     autocorrelation, collinearity = st.columns(2)
     with autocorrelation:
-        st.subheader("Residual autocorrelation")
+        help_heading(
+            "Residual autocorrelation",
+            "residual_variance",
+            key="diagnostics_residual_autocorrelation",
+        )
         st.metric(
             "Durbin–Watson",
             "—" if result.durbin_watson is None else f"{result.durbin_watson:.4g}",
+            help=(
+                "A residual autocorrelation diagnostic; values near 2 suggest little first-order "
+                "autocorrelation. It is a heuristic, not proof of independence."
+            ),
         )
         st.metric(
             "Ljung–Box p-value",
             "—" if result.ljung_box_p_value is None else f"{result.ljung_box_p_value:.4g}",
+            help=(
+                "Tests a null of no autocorrelation across selected lags under assumptions; the "
+                "p-value is not the probability the null is true."
+            ),
         )
         st.caption(
             "Computed on holdout residuals. Small samples and constant residuals make these "
             "diagnostics unavailable; neither test establishes model validity."
         )
     with collinearity:
-        st.subheader("Training-design collinearity")
-        st.metric("Condition number", f"{result.condition_number:.4g}")
+        help_heading(
+            "Training-design collinearity",
+            "multicollinearity",
+            key="diagnostics_training_collinearity",
+        )
+        st.metric(
+            "Condition number",
+            f"{result.condition_number:.4g}",
+            help=HELP_TEXT["multicollinearity"],
+        )
         if result.variance_inflation_factors:
             st.dataframe(
                 pd.DataFrame(

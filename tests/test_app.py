@@ -5,6 +5,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from media_mix_ai_lab.modeling.interfaces import ModelResult
+from media_mix_ai_lab.ui.help_content import HELP_TEXT
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
 NAVIGATION_INDEX = {
@@ -173,6 +174,60 @@ def test_models_fit_and_save_a_result():
     assert accounting.n_input == accounting.n_fitted == result.sample_size == 104
     assert accounting.n_excluded == 0
     assert any("104 input · 104 fitted · 0 excluded" in item.value for item in app.caption)
+
+
+def test_model_controls_have_contextual_help_and_render_result_headings():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Models")
+
+    specification = next(item for item in app.selectbox if item.label == "Model specification")
+    assert "Linear OLS (the default) uses outcome" in specification.help
+    assert "conditional elasticities" in specification.help
+    specification.set_value("log_log").run()
+    assert not app.exception
+
+    method = next(item for item in app.selectbox if item.label == "tv_spend adstock method")
+    method.set_value("geometric").run()
+    alpha = next(item for item in app.number_input if item.label == "tv_spend alpha")
+    assert "0 ≤ alpha < 1" in alpha.help
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    assert not app.exception
+    assert any(item.value == "Statistical evidence" for item in app.subheader)
+    assert any(item.value == "Coefficient estimates" for item in app.subheader)
+
+
+def test_adstock_and_diagnostics_controls_explain_splits_and_influence_limits():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Adstock Analysis")
+
+    budget = next(item for item in app.number_input if item.label == "Candidate budget")
+    assert "parameter combinations" in budget.help
+    assert (
+        "final test"
+        in next(item for item in app.slider if item.label == "Final test fraction").help
+    )
+    assert any("validation RMSE" in item.value for item in app.caption)
+
+    navigate(app, "Models")
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    navigate(app, "Diagnostics")
+    fraction = next(item for item in app.slider if item.label == "Holdout fraction")
+    assert "latest observations" in fraction.help
+    assert any(item.label == "Influence diagnostics and outlier policy" for item in app.expander)
+    assert any("DFBETAS" in item.value for item in app.markdown)
+    assert any("does not automatically remove" in item.value for item in app.markdown)
+    assert not app.exception
+
+
+def test_scientific_help_glossary_covers_statistical_and_causal_caveats():
+    assert "not the probability that a coefficient is correct" in HELP_TEXT["statistical_evidence"]
+    assert all(metric in HELP_TEXT["error_metrics"] for metric in ("MAE", "RMSE", "WAPE"))
+    assert "not by coefficient significance or causal impact" in HELP_TEXT["optimization_objective"]
+    assert all(
+        term in HELP_TEXT["influence_glossary"]
+        for term in ("DFBETAS", "Cook's distance", "leverage", "studentized residuals")
+    )
+    assert "does not automatically remove" in HELP_TEXT["outlier_policy"]
 
 
 def test_models_report_strict_log_domain_errors():
