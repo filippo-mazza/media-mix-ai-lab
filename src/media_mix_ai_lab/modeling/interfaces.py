@@ -104,8 +104,8 @@ class ModelResult(BaseModel):
     term_roles: dict[str, str]
     observation_accounting: ObservationAccounting
     sample_size: int = Field(ge=1)
-    r_squared: FiniteFloat
-    adjusted_r_squared: FiniteFloat
+    r_squared: FiniteFloat | None
+    adjusted_r_squared: FiniteFloat | None
     residual_variance: FiniteFloat
     equation: str
     transformations: dict[str, str]
