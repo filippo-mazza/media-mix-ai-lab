@@ -18,7 +18,11 @@ from media_mix_ai_lab.data.workspace import (
     validate_weekly_dataset,
 )
 from media_mix_ai_lab.modeling.interfaces import ModelResult
-from media_mix_ai_lab.modeling.ols import OLSModelEngine
+from media_mix_ai_lab.modeling.ols import (
+    ModelFitError,
+    OLSModelEngine,
+    summarize_observations,
+)
 
 NAVIGATION = (
     (
@@ -438,20 +442,61 @@ def models() -> None:
             )
             for channel in channels
         }
-    if st.button("Fit model"):
+    config = None
+    accounting = None
+    try:
+        config = ModelConfig(
+            kind=kind,
+            target=target,
+            channels=tuple(channels),
+            controls=tuple(controls),
+            intercept=intercept,
+            media_sign_expectations=sign_expectations,
+        )
+        accounting = summarize_observations(frame, config)
+    except ValueError as error:
+        st.error(f"Invalid model specification: {error}")
+
+    if accounting is not None:
+        st.subheader("Observation eligibility and log-domain checks")
+        accounting_columns = st.columns(4)
+        accounting_columns[0].metric("Total observations", accounting.n_input)
+        accounting_columns[1].metric("Eligible observations", accounting.n_eligible)
+        accounting_columns[2].metric("Nonpositive target", accounting.nonpositive_target_count)
+        accounting_columns[3].metric(
+            "Rows outside log domain (unique)", len(accounting.affected_rows)
+        )
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Column": target, "Nonpositive values": accounting.nonpositive_target_count},
+                    *[
+                        {"Column": column, "Nonpositive values": count}
+                        for column, count in accounting.nonpositive_media_counts.items()
+                    ],
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        st.json(accounting.model_dump(mode="json"))
+        if accounting.affected_rows:
+            with st.expander("Review affected source records"):
+                positions = [row.row_position for row in accounting.affected_rows]
+                affected = frame.iloc[positions].copy()
+                affected.insert(0, "Row index (0-based)", positions)
+                st.dataframe(affected, hide_index=True, width="stretch")
+
+    if st.button("Fit model", disabled=config is None):
         try:
-            config = ModelConfig(
-                kind=kind,
-                target=target,
-                channels=tuple(channels),
-                controls=tuple(controls),
-                intercept=intercept,
-                media_sign_expectations=sign_expectations,
-            )
+            assert config is not None
             result = OLSModelEngine().fit(frame, config)
             st.session_state.setdefault("model_results", []).append(
                 result.model_dump_json(indent=2)
             )
+        except ModelFitError as error:
+            st.error(f"Model fit failed: {error}")
+            st.json(error.accounting.model_dump(mode="json"))
         except ValueError as error:
             st.error(f"Model fit failed: {error}")
 
@@ -501,6 +546,13 @@ def _show_model_result(result: ModelResult) -> None:
     columns[1].metric("R²", f"{result.r_squared:.4f}")
     columns[2].metric("Adjusted R²", f"{result.adjusted_r_squared:.4f}")
     columns[3].metric("Residual variance", f"{result.residual_variance:.4g}")
+    accounting = result.observation_accounting
+    st.caption(
+        f"Observation accounting: {accounting.n_input} input · "
+        f"{accounting.n_fitted} fitted · {accounting.n_excluded} excluded"
+    )
+    with st.expander("Observation accounting and transformation policy"):
+        st.json(accounting.model_dump(mode="json"))
     estimates, evidence, numerical, plausibility = st.tabs(
         ["Estimates", "Statistical evidence", "Numerical diagnostics", "Business plausibility"]
     )
@@ -530,9 +582,14 @@ def _show_model_result(result: ModelResult) -> None:
                     {
                         "Term": term,
                         "Standard error": assessment.standard_error,
+                        "t-statistic": (
+                            assessment.t_statistic if assessment.t_statistic is not None else "—"
+                        ),
                         "95% CI lower": assessment.confidence_interval[0],
                         "95% CI upper": assessment.confidence_interval[1],
                         "CI spans zero": "Yes" if assessment.ci_spans_zero else "No",
+                        "p-value": _format_p_value(assessment.p_value),
+                        "Signif.": assessment.significance_code,
                     }
                     for term, assessment in result.term_assessments.items()
                 ]
@@ -541,9 +598,12 @@ def _show_model_result(result: ModelResult) -> None:
             width="stretch",
         )
         st.caption(
-            "Classical 95% OLS intervals assume a correctly specified model with independent, "
-            "homoskedastic errors. They measure sampling uncertainty under those assumptions; "
-            "they do not establish causality."
+            "Significance codes: *** p ≤ 0.001 · ** p ≤ 0.01 · * p ≤ 0.05 · . p ≤ 0.10. "
+            "These are classical two-sided OLS t-test p-values. They assume a correctly "
+            "specified model with independent, homoskedastic errors (and normal errors for "
+            "exact finite-sample inference). Stars summarize evidence under those assumptions; "
+            "time-series dependence and multiple testing can make them misleading. Stars do "
+            "not measure effect size or establish causality."
         )
         _show_diagnostic_flags(result, "statistical_evidence")
 
@@ -633,6 +693,13 @@ def _show_diagnostic_flags(result: ModelResult, category: str) -> None:
             st.warning(message)
 
 
+def _format_p_value(p_value: float | None) -> str:
+    """Format p-values for display while JSON retains full numeric precision."""
+    if p_value is None:
+        return "—"
+    return "<0.001" if p_value < 0.001 else f"{p_value:.3f}"
+
+
 def assistant() -> None:
     st.title("AI Assistant")
     st.info("Provider-independent interface prepared. No LLM is connected; no API key is required.")
@@ -667,7 +734,7 @@ def main() -> None:
         if source["kind"] == "upload":
             validate_weekly_dataset(frame, mapping)
         else:
-            validate_dataset(frame)
+            validate_dataset(frame, allow_negative_target_media=section == "Models")
     except ValueError as error:
         st.error(f"Dataset validation failed: {error}")
         st.button("Restore synthetic sample", on_click=_load_sample)

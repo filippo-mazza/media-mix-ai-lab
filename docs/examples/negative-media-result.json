@@ -23,11 +23,35 @@
     "const": 2.2399913662138107e-14,
     "tv_spend": 1.8699086639850313e-15
   },
+  "t_statistics": {
+    "const": 4464302921355762.0,
+    "tv_spend": -1069570957405867.4
+  },
   "confidence_intervals": {
     "const": [99.99999999999996, 100.00000000000004],
     "tv_spend": [-2.0, -1.9999999999999922]
   },
+  "p_values": {
+    "const": 7.415864359045553e-272,
+    "tv_spend": 1.0963639480210133e-260
+  },
+  "significance_codes": {"const": "***", "tv_spend": "***"},
   "term_roles": {"const": "intercept", "tv_spend": "media"},
+  "observation_accounting": {
+    "n_input": 20,
+    "n_eligible": 20,
+    "n_fitted": 20,
+    "n_excluded": 0,
+    "nonpositive_target_count": 0,
+    "nonpositive_media_counts": {"tv_spend": 0},
+    "affected_rows": [],
+    "transform_policy": {
+      "target": "original level",
+      "media": {"tv_spend": "original level"},
+      "controls": {},
+      "log_domain_failure": "No logarithmic transforms."
+    }
+  },
   "sample_size": 20,
   "r_squared": 1.0,
   "adjusted_r_squared": 1.0,
@@ -47,8 +71,11 @@
       "role": "intercept",
       "estimate": 100.0,
       "standard_error": 2.2399913662138107e-14,
+      "t_statistic": 4464302921355762.0,
       "confidence_interval": [99.99999999999996, 100.00000000000004],
       "ci_spans_zero": false,
+      "p_value": 7.415864359045553e-272,
+      "significance_code": "***",
       "scale": "revenue units",
       "interpretation": "Expected revenue units when every included predictor equals zero; interpret only if that reference point is meaningful.",
       "expected_direction": null
@@ -58,8 +85,11 @@
       "role": "media",
       "estimate": -1.9999999999999962,
       "standard_error": 1.8699086639850313e-15,
+      "t_statistic": -1069570957405867.4,
       "confidence_interval": [-2.0, -1.9999999999999922],
       "ci_spans_zero": false,
+      "p_value": 1.0963639480210133e-260,
+      "significance_code": "***",
       "scale": "revenue units per tv_spend unit",
       "interpretation": "A one-unit increase in tv_spend is associated with a -2-unit change in revenue, holding the other included terms constant; this is an association, not causation.",
       "expected_direction": "positive"
@@ -89,7 +119,7 @@
   "design_rank": 2,
   "parameter_count": 2,
   "warnings": [
-    "Classical OLS standard errors and confidence intervals assume a correctly specified model with independent, homoskedastic errors; weekly dependence and omitted confounders may invalidate them.",
+    "Classical OLS standard errors, confidence intervals, and two-sided t-test p-values assume a correctly specified model with independent, homoskedastic errors (and normal errors for exact finite-sample inference); weekly dependence and omitted confounders may invalidate them.",
     "tv_spend: unexpected sign—investigate; sign expectations are review hypotheses, not constraints."
   ]
 }

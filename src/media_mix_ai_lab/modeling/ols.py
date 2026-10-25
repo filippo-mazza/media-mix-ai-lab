@@ -11,7 +11,20 @@ import statsmodels.api as sm
 
 from media_mix_ai_lab.core.config import ModelConfig
 from media_mix_ai_lab.diagnostics.coefficients import assess_coefficients
-from media_mix_ai_lab.modeling.interfaces import ModelResult
+from media_mix_ai_lab.modeling.interfaces import (
+    AffectedObservation,
+    ModelResult,
+    ObservationAccounting,
+    TransformPolicy,
+)
+
+
+class ModelFitError(ValueError):
+    """A fit failure with structured observation accounting."""
+
+    def __init__(self, message: str, accounting: ObservationAccounting) -> None:
+        super().__init__(message)
+        self.accounting = accounting
 
 
 class OLSModelEngine:
@@ -39,6 +52,30 @@ class OLSModelEngine:
             ):
                 raise ValueError(f"{column} must contain numeric, finite, nonmissing values.")
 
+        accounting = summarize_observations(data, config)
+        if config.kind == "log_log" and accounting.n_eligible < accounting.n_input:
+            invalid = [
+                f"{column}: {count} nonpositive value(s)"
+                for column, count in (
+                    (config.target, accounting.nonpositive_target_count),
+                    *accounting.nonpositive_media_counts.items(),
+                )
+                if count
+            ]
+            examples = []
+            for row in accounting.affected_rows[:3]:
+                label = f"row {row.row_position}"
+                if row.date is not None:
+                    label += f" (date={row.date})"
+                examples.append(label)
+            raise ModelFitError(
+                "Strict log-log requires positive outcome and media values; "
+                + "; ".join(invalid)
+                + f". Affected rows: {', '.join(examples)}. "
+                "No rows were dropped and no epsilon was added.",
+                accounting,
+            )
+
         if config.kind == "log_log":
             transformed_channels = [f"log({column})" for column in config.channels]
             collisions = set(transformed_channels).intersection(config.controls)
@@ -47,7 +84,6 @@ class OLSModelEngine:
                     "Transformed media predictor names collide with selected controls: "
                     f"{', '.join(sorted(collisions))}. Rename the conflicting columns."
                 )
-            self._validate_log_domain(data, config)
             y = np.log(data[config.target].astype(float)).rename(f"log({config.target})")
             design = pd.DataFrame(index=data.index)
             for column in config.channels:
@@ -91,6 +127,14 @@ class OLSModelEngine:
         fitted = sm.OLS(y, design, hasconst=config.intercept).fit()
         coefficients = fitted.params.to_dict()
         standard_errors = fitted.bse.to_dict()
+        t_statistics = {
+            name: float(value) if np.isfinite(value) else None
+            for name, value in fitted.tvalues.items()
+        }
+        p_values = {
+            name: float(value) if np.isfinite(value) else None
+            for name, value in fitted.pvalues.items()
+        }
         intervals = fitted.conf_int()
         confidence_intervals = {
             name: (float(intervals.loc[name, 0]), float(intervals.loc[name, 1]))
@@ -132,7 +176,9 @@ class OLSModelEngine:
             config=config,
             coefficients=coefficients,
             standard_errors=standard_errors,
+            t_statistics=t_statistics,
             confidence_intervals=confidence_intervals,
+            p_values=p_values,
             term_roles=roles,
             residual_degrees_freedom=residual_degrees_freedom,
             condition_number=condition_number,
@@ -141,8 +187,9 @@ class OLSModelEngine:
             retained_labeled_outliers=retained_outliers,
         )
         warnings = [
-            "Classical OLS standard errors and confidence intervals assume a correctly "
-            "specified model with independent, homoskedastic errors; weekly dependence "
+            "Classical OLS standard errors, confidence intervals, and two-sided t-test "
+            "p-values assume a correctly specified model with independent, homoskedastic "
+            "errors (and normal errors for exact finite-sample inference); weekly dependence "
             "and omitted confounders may invalidate them."
         ]
         if config.kind == "log_log":
@@ -155,8 +202,16 @@ class OLSModelEngine:
             dataset_sha256=self._fingerprint(data),
             coefficients={name: float(value) for name, value in coefficients.items()},
             standard_errors={name: float(value) for name, value in standard_errors.items()},
+            t_statistics=t_statistics,
             confidence_intervals=confidence_intervals,
+            p_values=p_values,
+            significance_codes={
+                name: assessment.significance_code for name, assessment in term_assessments.items()
+            },
             term_roles=roles,
+            observation_accounting=accounting.model_copy(
+                update={"n_fitted": sample_size, "n_excluded": 0}
+            ),
             sample_size=sample_size,
             r_squared=fitted_metrics["r_squared"],
             adjusted_r_squared=fitted_metrics["adjusted_r_squared"],
@@ -181,29 +236,6 @@ class OLSModelEngine:
         )
 
     @staticmethod
-    def _validate_log_domain(data: pd.DataFrame, config: ModelConfig) -> None:
-        invalid: list[str] = []
-        for column in (config.target, *config.channels):
-            positions = np.flatnonzero(data[column].to_numpy(dtype=float) <= 0)
-            if positions.size:
-                examples = []
-                for position in positions[:3]:
-                    label = f"row {data.index[position]!r}"
-                    if "date" in data.columns:
-                        label += f" (date={data['date'].iloc[position]!r})"
-                    examples.append(label)
-                invalid.append(
-                    f"{column}: {positions.size} nonpositive value(s), examples: "
-                    f"{', '.join(examples)}"
-                )
-        if invalid:
-            raise ValueError(
-                "Strict log-log requires positive outcome and media values; "
-                + "; ".join(invalid)
-                + ". No rows were transformed or removed."
-            )
-
-    @staticmethod
     def _equation(config: ModelConfig) -> str:
         logged = config.kind == "log_log"
         lhs = f"log({config.target})" if logged else config.target
@@ -226,3 +258,53 @@ class OLSModelEngine:
         digest.update(json.dumps(metadata, ensure_ascii=False).encode("utf-8"))
         digest.update(pd.util.hash_pandas_object(data, index=True).to_numpy().tobytes())
         return digest.hexdigest()
+
+
+def summarize_observations(data: pd.DataFrame, config: ModelConfig) -> ObservationAccounting:
+    """Count log-domain eligibility and the unique affected rows without mutation."""
+    columns = (config.target, *config.channels)
+    positions_by_column = {
+        column: np.flatnonzero(data[column].to_numpy(dtype=float) <= 0) for column in columns
+    }
+    affected_positions = sorted(
+        {int(position) for positions in positions_by_column.values() for position in positions}
+    )
+    affected_rows = []
+    for position in affected_positions:
+        date = None
+        if "date" in data.columns and not pd.isna(data["date"].iloc[position]):
+            value = data["date"].iloc[position]
+            date = value.isoformat() if hasattr(value, "isoformat") else str(value)
+        affected_rows.append(
+            AffectedObservation(
+                row_position=position,
+                date=date,
+                columns=tuple(
+                    column for column in columns if position in positions_by_column[column]
+                ),
+            )
+        )
+
+    is_log_log = config.kind == "log_log"
+    return ObservationAccounting(
+        n_input=len(data),
+        n_eligible=len(data) - len(affected_positions) if is_log_log else len(data),
+        nonpositive_target_count=len(positions_by_column[config.target]),
+        nonpositive_media_counts={
+            column: len(positions_by_column[column]) for column in config.channels
+        },
+        affected_rows=tuple(affected_rows),
+        transform_policy=TransformPolicy(
+            target="natural log" if is_log_log else "original level",
+            media={
+                column: "natural log" if is_log_log else "original level"
+                for column in config.channels
+            },
+            controls={column: "original level" for column in config.controls},
+            log_domain_failure=(
+                "Fail if any target or media value is nonpositive; do not drop rows or add epsilon."
+                if is_log_log
+                else "No logarithmic transforms."
+            ),
+        ),
+    )

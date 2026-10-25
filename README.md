@@ -14,10 +14,10 @@ Experiments may involve different model families (for example, **Astra**) and di
 
 ## Status and stack
 
-The foundation is a working Streamlit workbench with synthetic data exploration
-and an in-session weekly CSV workspace, plus transparent linear/log-log OLS
-fitting. AI conversations and ROI estimation are not implemented. No credentials,
-external services, or paid APIs are required.
+The foundation is a working Streamlit workbench with synthetic data exploration,
+an in-session weekly CSV workspace, and transparent linear/log-log OLS fitting
+with explicit observation accounting. AI conversations and ROI estimation are
+not implemented. No credentials, external services, or paid APIs are required.
 
 Python **3.12**, Streamlit, Plotly, Pandas, NumPy, Statsmodels, SciPy,
 Scikit-learn, and Pydantic form the application stack. **uv** manages dependencies
@@ -39,8 +39,9 @@ The app starts on Home with a sample already loaded. Choose **Explore** in the
 sidebar to inspect weekly revenue, channel spend, and controls using interactive
 Plotly charts. **Data** shows the complete table, offers a CSV download, and
 accepts a weekly CSV with explicit date, target, channel, and optional control
-mapping. The **Models** section fits OLS or strict log-log OLS and lets you
-download each fit with its specification and provenance as JSON.
+mapping. The **Models** section shows pre-fit eligibility and log-domain checks,
+fits OLS or strict log-log OLS, and lets you download each fit with its
+observation accounting, specification, diagnostics, and provenance as JSON.
 
 ```sh
 uv run pytest
@@ -50,8 +51,8 @@ uv run ruff format --check .
 
 CI runs the locked install, lint, formatting check, and tests on Python 3.12.
 Tests exercise data reproducibility, schema errors, preservation of inputs,
-configuration validation, OLS coefficient recovery and error cases, typed
-summary tools, and all six Streamlit sections.
+configuration validation, OLS coefficient recovery, observation accounting and
+error cases, typed summary tools, and all six Streamlit sections.
 
 ## Architecture
 
@@ -91,11 +92,25 @@ observations. The selected outcome and predictors must also be numeric, finite,
 and nonmissing. Exact rank deficiency and designs without residual degrees of
 freedom are rejected rather than returning unidentified coefficients.
 
+Before fitting, the workbench reports total and eligible observations,
+nonpositive values by logged variable, and the unique affected source rows. A
+successful result records input, fitted, and excluded counts plus one explicit
+transformation policy. Under the current strict policy, every successful fit
+uses every input row: `sample_size == n_fitted` and `n_excluded == 0`.
+
 The result separates coefficient estimates and units, classical statistical
 evidence, numerical diagnostics, and business-plausibility hypotheses. Each term
-shows its standard error, 95% confidence interval, whether the interval spans
-zero, and a deterministic noncausal interpretation. The app intentionally omits
-p-values rather than turning an arbitrary cutoff into a causal verdict.
+shows its standard error, t-statistic, 95% confidence interval, whether the
+interval spans zero, its classical two-sided t-test p-value, an R-style
+significance code, and a deterministic noncausal interpretation. The engine uses
+the fitted Statsmodels `tvalues` and `pvalues` directly and retains their full
+numeric precision in JSON; the UI displays very small p-values as `<0.001`.
+Significance codes use the familiar
+`***` p ≤ 0.001, `**` p ≤ 0.01, `*` p ≤ 0.05, and `.` p ≤ 0.10 thresholds.
+They summarize evidence for H₀: coefficient = 0, conditional on the selected
+model and the displayed classical OLS assumptions. Time-series dependence and
+multiple testing can make them misleading. Stars do not measure effect size or
+turn an association into a causal result.
 
 Media terms default to an expected positive direction, configurable per channel
 as positive, negative, or either sign. A conflicting estimate is labelled
@@ -223,3 +238,5 @@ and uses the lockfile with the selected Python version.
 ![Synthetic dataset exploration](docs/screenshots/explore.png)
 
 ![Model diagnostic warning summary](docs/screenshots/model-diagnostics.png)
+
+![OLS statistical evidence with p-values](docs/screenshots/model-statistical-evidence.png)
