@@ -287,6 +287,7 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
                     except (TypeError, ValueError) as error:
                         st.error(str(error))
                     else:
+                        _clear_adstock_session()
                         st.session_state["dataset"] = mapped
                         st.session_state["dataset_mapping"] = new_mapping
                         st.session_state["dataset_source"] = {
@@ -334,6 +335,7 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
 
 
 def _load_sample() -> None:
+    _clear_adstock_session()
     st.session_state["dataset"] = generate_sample_data()
     st.session_state["dataset_mapping"] = {
         "date": "date",
@@ -345,6 +347,12 @@ def _load_sample() -> None:
         "kind": "synthetic",
         "filename": "weekly_marketing.csv",
     }
+
+
+def _clear_adstock_session() -> None:
+    """Discard calibration state whenever the active dataset is replaced."""
+    for key in ("adstock_search", "adstock_applied_config", "adstock_exploration"):
+        st.session_state.pop(key, None)
 
 
 def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> None:
@@ -547,7 +555,7 @@ def models() -> None:
             media_sign_expectations=sign_expectations,
             adstock=adstock_settings,
         )
-        applied = st.session_state.get("adstock_applied_config")
+        applied = st.session_state.pop("adstock_applied_config", None)
         if applied is not None:
             selected = ModelConfig.model_validate(applied)
             if (selected.target, selected.channels, selected.date_column) == (
@@ -555,8 +563,7 @@ def models() -> None:
                 config.channels,
                 config.date_column,
             ):
-                config = config.model_copy(update={"adstock": selected.adstock})
-                st.info("Applied calibrated adstock settings are active for this fit.")
+                st.info("Calibrated settings were loaded into the editable controls above.")
         accounting = summarize_observations(frame, config)
     except ValueError as error:
         config = None

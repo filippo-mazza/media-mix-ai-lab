@@ -23,6 +23,16 @@ def test_partition_counts_and_budget():
     assert len(candidate_specs(("spend",), "delayed_geometric", 8, 7)) == 7
 
 
+def test_bounded_candidates_explore_every_selected_channel():
+    channels = ("tv", "search", "social")
+    candidates = candidate_specs(channels, "geometric", 8, 10)
+
+    assert len(candidates) == 10
+    for channel in channels:
+        assert len({candidate[channel].alpha for candidate in candidates}) > 1
+    assert candidates == candidate_specs(channels, "geometric", 8, 10)
+
+
 def test_search_is_deterministic_and_final_outcome_isolation():
     frame = fixture()
     config = ModelConfig(target="revenue", channels=("spend",), controls=())

@@ -1,6 +1,6 @@
 """Bounded chronological calibration of deterministic adstock settings."""
 
-from itertools import islice, product
+from itertools import product
 
 import numpy as np
 import pandas as pd
@@ -48,10 +48,25 @@ def candidate_specs(
         ]
     else:
         raise ValueError("Unknown adstock family.")
-    return [
-        dict(zip(channels, specs, strict=True))
-        for specs in islice(product(grid, repeat=len(channels)), budget)
-    ]
+    total = len(grid) ** len(channels)
+    count = min(budget, total)
+    if count == 1:
+        indices = [(total - 1) // 2]
+    else:
+        indices = [index * (total - 1) // (count - 1) for index in range(count)]
+    candidates = []
+    for candidate_index in indices:
+        settings = []
+        for channel_index in range(len(channels)):
+            divisor = len(grid) ** (len(channels) - channel_index - 1)
+            settings.append(grid[(candidate_index // divisor) % len(grid)])
+        candidates.append(dict(zip(channels, settings, strict=True)))
+    return candidates
+
+
+def dataset_sha256(data: pd.DataFrame) -> str:
+    """Return the same immutable dataset identity used by fitted model results."""
+    return OLSModelEngine._fingerprint(data)
 
 
 def search(
@@ -111,7 +126,7 @@ def search(
     final_prediction = _predict(final_design, pd.Series(final_fit.coefficients), selected_config)
     final_metrics = _error_metrics(test[base.target].to_numpy(dtype=float), final_prediction)
     return {
-        "data_sha256": OLSModelEngine._fingerprint(data),
+        "data_sha256": dataset_sha256(data),
         "method": "chronological fit/validation selection, final test once",
         "normalization": "raw",
         "warm_up": "zero initial state; past observed spend carried across boundaries",

@@ -9,7 +9,12 @@ import streamlit as st
 
 from media_mix_ai_lab.core.config import AdstockSpec, ModelConfig
 from media_mix_ai_lab.modeling.adstock import adstock_impulse_response, apply_adstock
-from media_mix_ai_lab.optimization.adstock_search import candidate_specs, partition, search
+from media_mix_ai_lab.optimization.adstock_search import (
+    candidate_specs,
+    dataset_sha256,
+    partition,
+    search,
+)
 
 
 def adstock_page() -> None:
@@ -43,23 +48,27 @@ def adstock_page() -> None:
             ),
             width="stretch",
         )
-        transformed = apply_adstock(frame[channel], spec)
-        plot = pd.DataFrame(
-            {
-                mapping["date"]: frame[mapping["date"]],
-                "Raw spend": frame[channel],
-                "Transformed spend": transformed,
-            }
-        )
-        st.plotly_chart(
-            px.line(
-                plot,
-                x=mapping["date"],
-                y=["Raw spend", "Transformed spend"],
-                title=f"{channel} · weekly spend units · zero prehistory",
-            ),
-            width="stretch",
-        )
+        try:
+            transformed = apply_adstock(frame[channel], spec)
+        except ValueError as error:
+            st.warning(f"Spend preview unavailable: {error}")
+        else:
+            plot = pd.DataFrame(
+                {
+                    mapping["date"]: frame[mapping["date"]],
+                    "Raw spend": frame[channel],
+                    "Transformed spend": transformed,
+                }
+            )
+            st.plotly_chart(
+                px.line(
+                    plot,
+                    x=mapping["date"],
+                    y=["Raw spend", "Transformed spend"],
+                    title=f"{channel} · weekly spend units · zero prehistory",
+                ),
+                width="stretch",
+            )
         half_life = np.log(0.5) / np.log(alpha) if family == "geometric" and 0 < alpha < 1 else None
         st.caption(
             f"{channel}: {family}, alpha={spec.alpha:g}, theta={theta}, L={lag}, "
@@ -134,6 +143,11 @@ def adstock_page() -> None:
                 except ValueError as error:
                     st.error(f"Search failed: {error}")
         result = st.session_state.get("adstock_search")
+        if result and result["data_sha256"] != dataset_sha256(frame):
+            st.session_state.pop("adstock_search", None)
+            st.session_state.pop("adstock_applied_config", None)
+            result = None
+            st.warning("The previous search belongs to a different dataset and was cleared.")
         if result:
             st.success("Search complete")
             rows = [
@@ -179,8 +193,33 @@ def adstock_page() -> None:
             st.metric("Final held-out RMSE · selected only", f"{result['final_test']['rmse']:.3f}")
             st.caption(result["caveat"])
             if st.button("Apply selected parameters"):
-                st.session_state["adstock_applied_config"] = result["selected"]["config"]
-                st.success("Selected configuration saved for the Models page.")
+                selected = ModelConfig.model_validate(result["selected"]["config"])
+                for mapped_channel in channels:
+                    st.session_state[f"adstock_method_{mapped_channel}"] = "none"
+                for selected_channel, selected_spec in selected.adstock.items():
+                    st.session_state[f"adstock_method_{selected_channel}"] = selected_spec.method
+                    st.session_state[f"adstock_scaling_{selected_channel}"] = (
+                        selected_spec.weight_scaling
+                    )
+                    st.session_state[f"adstock_alpha_{selected_channel}"] = float(
+                        selected_spec.alpha
+                    )
+                    if selected_spec.method == "geometric":
+                        st.session_state[f"adstock_initial_state_{selected_channel}"] = float(
+                            selected_spec.initial_state
+                        )
+                    elif selected_spec.method == "delayed_geometric":
+                        st.session_state[f"adstock_lag_{selected_channel}"] = (
+                            selected_spec.max_lag_weeks
+                        )
+                        st.session_state[f"adstock_theta_{selected_channel}"] = float(
+                            selected_spec.theta
+                        )
+                        st.session_state[f"adstock_history_{selected_channel}"] = ",".join(
+                            str(value) for value in selected_spec.historical_values
+                        )
+                st.session_state["adstock_applied_config"] = selected.model_dump(mode="json")
+                st.success("Selected settings loaded into the editable Models controls.")
             st.download_button(
                 "Download search manifest",
                 json.dumps(result, indent=2),

@@ -80,6 +80,47 @@ def test_adstock_search_and_apply():
     ).click().run()
     assert app.session_state["adstock_applied_config"]
 
+    navigate(app, "Models")
+    assert "adstock_applied_config" not in app.session_state
+    method = next(item for item in app.selectbox if item.label == "tv_spend adstock method")
+    method.set_value("geometric").run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    result = ModelResult.model_validate_json(app.session_state["model_results"][-1])
+    assert result.config.adstock["tv_spend"].method == "geometric"
+
+
+def test_adstock_search_is_invalidated_when_data_changes():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Adstock Analysis")
+    next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    ).click().run()
+    assert app.session_state["adstock_search"]
+
+    app.session_state["dataset"].loc[0, "revenue"] += 1
+    app.run()
+
+    assert not app.exception
+    assert "adstock_search" not in app.session_state
+    assert any("different dataset" in warning.value for warning in app.warning)
+
+
+def test_adstock_preview_reports_invalid_spend_without_crashing():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.session_state["dataset"].loc[0, "tv_spend"] = float("nan")
+    app.session_state["dataset_source"] = {
+        "kind": "upload",
+        "filename": "missing.csv",
+        "sha256": "test",
+        "rows": 104,
+        "columns": 9,
+    }
+    navigate(app, "Adstock Analysis")
+
+    assert not app.exception
+    assert any("Spend preview unavailable" in warning.value for warning in app.warning)
+    assert any(button.label == "Optimize adstock parameters" for button in app.button)
+
 
 def test_models_fit_and_save_a_result():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
