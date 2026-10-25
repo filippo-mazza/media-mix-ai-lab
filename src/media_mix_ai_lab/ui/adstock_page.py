@@ -10,6 +10,7 @@ import streamlit as st
 from media_mix_ai_lab.core.config import AdstockSpec, ModelConfig
 from media_mix_ai_lab.modeling.adstock import adstock_impulse_response, apply_adstock
 from media_mix_ai_lab.optimization.adstock_search import (
+    assess_feasibility,
     candidate_specs,
     dataset_sha256,
     evaluate_final_test,
@@ -126,16 +127,19 @@ def _optimization_explanation() -> None:
     )
     st.subheader("When optimization is not feasible")
     st.write(
-        "A search needs regular weekly dates, finite nonnegative channel spend, enough fitting "
-        "weeks to estimate every coefficient with residual degrees of freedom, at least one "
-        "validation and final-test week, and a full-rank design. Log-log models additionally "
-        "need positive outcome and transformed media values. A multi-channel budget must be "
-        "large enough to vary each channel independently."
+        "Let L be the candidate lag horizon (L=0 for no-adstock). The default minimum is fitted "
+        "coefficients plus the larger of 5 residual degrees of freedom or L + 1 training weeks; "
+        "validation and final test each need the larger of 5 weeks or L + 1. The first min(L, "
+        "N fit) weeks initialize adstock history but are not fitted. These code-configurable "
+        "defaults are conservative workbench heuristics, not statistically validated universal "
+        "sample-size thresholds. Log-log models require positive fitted outcomes and positive "
+        "transformed media in each partition; validation and test outcomes are scored in their "
+        "original units. Invalid rows are not silently dropped."
     )
     st.caption(
-        "Try more history, fewer channels or controls, a larger candidate budget, a smaller "
-        "final-test fraction, or linear OLS when zeros prevent log-log fitting. Fix missing or "
-        "irregular weeks at the source; the app does not silently impute or drop them."
+        "Add historical weeks, shorten the lag horizon, reduce model complexity, or adjust the "
+        "chronological split while retaining meaningful validation and test periods. Fix missing "
+        "or irregular weeks at the source; the app does not silently impute or drop them."
     )
 
 
@@ -325,11 +329,24 @@ def adstock_page() -> None:
                 "train_validation_test",
                 key="adstock_optimization_partitions",
             )
+            feasibility = assess_feasibility(
+                frame,
+                config,
+                method=method,
+                max_lag=horizon,
+                holdout_fraction=holdout,
+                budget=int(budget),
+            )
             cols = st.columns(4)
             for col, label, count in zip(
                 cols,
                 ["N total", "N fit", "N validation", "N final test"],
-                [len(frame), len(fit), len(validation), len(test)],
+                [
+                    feasibility.n_total,
+                    feasibility.n_fit,
+                    feasibility.n_validation,
+                    feasibility.n_test,
+                ],
                 strict=True,
             ):
                 col.metric(label, count, help=HELP_TEXT["sample_counts"])
@@ -337,6 +354,8 @@ def adstock_page() -> None:
                 " · ".join(
                     f"{name}: {part[mapping['date']].iloc[0].date()} to "
                     f"{part[mapping['date']].iloc[-1].date()}"
+                    if not part.empty
+                    else f"{name}: no rows"
                     for name, part in (
                         ("Fit", fit),
                         ("Validation", validation),
@@ -344,7 +363,6 @@ def adstock_page() -> None:
                     )
                 )
             )
-            count = len(candidate_specs(selected_channels, method, horizon, int(budget))) + 1
             current_specification = search_specification(
                 frame,
                 config,
@@ -353,10 +371,55 @@ def adstock_page() -> None:
                 budget=int(budget),
                 holdout_fraction=holdout,
             )
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Partition": name,
+                            "Warm-up": feasibility.n_warmup if name == "Fit" else 0,
+                            "Log-domain unusable": getattr(
+                                feasibility, f"n_log_unusable_{name.lower()}"
+                            ),
+                            "Usable N": usable,
+                            "Required minimum": required,
+                        }
+                        for name, usable, required in (
+                            ("Fit", feasibility.n_fit, feasibility.required_fit),
+                            (
+                                "Validation",
+                                feasibility.n_validation,
+                                feasibility.required_validation,
+                            ),
+                            ("Test", feasibility.n_test, feasibility.required_test),
+                        )
+                    ]
+                ),
+                hide_index=True,
+                width="stretch",
+            )
+            n_log_unusable = (
+                feasibility.n_log_unusable_fit
+                + feasibility.n_log_unusable_validation
+                + feasibility.n_log_unusable_test
+            )
             st.caption(
-                f"At most {count} candidate fits including no-adstock baseline. "
-                "Warm-up exclusions: 0; zero prehistory, observed past spend carried across "
-                "splits. " + HELP_TEXT["optimization_objective"]
+                f"N warm-up: {feasibility.n_warmup}; strict log-domain unusable rows: "
+                f"{n_log_unusable}."
+            )
+            if feasibility.feasible:
+                count = len(candidate_specs(selected_channels, method, horizon, int(budget)))
+                if method != "none":
+                    count += 1
+            else:
+                count = None
+            st.caption(
+                f"At most {count} candidate fits including no-adstock baseline."
+                if count is not None
+                else "Candidate search is unavailable until all sample-size requirements are met."
+            )
+            st.caption(
+                "Zero prehistory is used before the first observed week; observed past spend "
+                "is carried across splits. " + HELP_TEXT["optimization_objective"]
             )
         except ValueError as error:
             st.error(str(error))
@@ -367,12 +430,23 @@ def adstock_page() -> None:
             st.session_state.pop("adstock_applied_config", None)
             result = None
             st.warning("Search inputs changed, so the previous result was cleared.")
+        if not feasibility.feasible:
+            st.error("Not feasible")
+            for failure in feasibility.failures:
+                st.write(f"- {failure}")
+            st.info(
+                "Add more historical weeks, shorten the lag horizon, reduce channels or controls, "
+                "or adjust the split while preserving meaningful validation and final-test periods."
+            )
         if final_test_used:
             st.warning(
                 "The final test has already been used for this dataset. Start with a newly "
                 "loaded dataset before claiming another unbiased final evaluation."
             )
-        if st.button("Optimize adstock parameters", disabled=final_test_used):
+        if st.button(
+            "Optimize adstock parameters",
+            disabled=final_test_used or not feasibility.feasible,
+        ):
             with st.spinner("Evaluating bounded candidate grid…"):
                 try:
                     st.session_state["adstock_search"] = search(
@@ -387,7 +461,7 @@ def adstock_page() -> None:
                     result = st.session_state["adstock_search"]
                 except ValueError as error:
                     st.error(f"Search failed: {error}")
-        if result:
+        if result and feasibility.feasible:
             st.success("Search complete")
             help_heading(
                 "Candidate results",

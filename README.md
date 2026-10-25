@@ -87,12 +87,21 @@ chronological fit, validation, and final-test periods (60/20/20 by default),
 ranks a bounded candidate grid by validation RMSE, and leaves final-test outcomes
 unread until the analyst explicitly freezes the selection and evaluates it once.
 Further searches on that dataset are then locked. The downloadable manifest records candidates, errors,
-partitions, transforms, and software versions. All transforms use zero
-prehistory and observed past spend across partition boundaries; no warm-up rows
-are removed. Log-target predictions use `exp(predicted log outcome)` without a
-smearing correction, so level-scale errors may be biased. This is predictive
-parameter selection, not evidence of causal advertising effects; coefficient
-p-values after selection are optimistic.
+partitions, transforms, and software versions. Let `L` be the candidate lag horizon
+(`0` for no-adstock). The first `min(L, N_fit)` fitting weeks initialize adstock
+history and are excluded from coefficient fitting; zero prehistory is assumed and
+observed past spend carries across split boundaries. Before searching, the default
+feasibility policy requires fitted coefficients plus `max(5, L + 1)` usable fitting
+weeks, and `max(5, L + 1)` usable validation and final-test weeks. Log-log search also requires
+positive fitted outcomes and positive transformed media in each partition; validation
+and test outcomes are scored in original units, and final-test outcomes are not read
+during selection. Invalid feature rows are not dropped. Code callers can customize
+the two minimums with `FeasibilityPolicy`; defaults are conservative workbench
+heuristics, not statistically validated universal thresholds. Passing them does not
+establish parameter identifiability or predictive reliability. Log-target predictions use
+`exp(predicted log outcome)` without a smearing correction, so level-scale errors may
+be biased. This is predictive parameter selection, not evidence of causal advertising
+effects; coefficient p-values after selection are optimistic.
 
 On **Models**, choose the outcome, mapped media predictors, optional controls,
 model family, and whether to include an intercept. Linear OLS fits
