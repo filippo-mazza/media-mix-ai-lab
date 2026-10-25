@@ -78,6 +78,8 @@ def test_log_log_recovers_media_elasticities_and_keeps_controls_in_levels():
     }
     assert "conditional elasticities, not causal ROI" in " ".join(result.warnings)
     assert result.term_roles["log(tv_spend)"] == "media"
+    assert "16.18% change" in result.term_assessments["promotion"].interpretation
+    assert result.term_assessments["promotion"].scale.startswith("model-implied %")
     negative_flag = next(
         flag
         for flag in result.diagnostic_flags

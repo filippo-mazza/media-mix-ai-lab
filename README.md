@@ -133,9 +133,12 @@ the corresponding predictor, conditional on the other selected terms. In
 log-log models, media slopes are conditional elasticities: approximately the
 percent change in outcome for a one-percent change in that media predictor,
 holding other terms fixed. They are not ROI or causal lift. Level-control
-coefficients in a log-log model are not elasticities. No rows are silently
-cleaned or removed. Adstock, temporal validation, and response curves are not
-implemented. Numerical results remain separate from AI interpretations.
+coefficients in a log-log model are not elasticities: the displayed finite
+one-unit change is converted with `100 × expm1(coefficient)`, which is the
+model-implied percentage change rather than the small-change approximation
+`100 × coefficient`. No rows are silently cleaned or removed. Adstock, temporal
+validation, and response curves are not implemented. Numerical results remain
+separate from AI interpretations.
 The allowlisted AI-facing tool computes descriptive statistics directly from
 validated data; no remote provider, autonomous dispatcher, or generated code
 execution exists.

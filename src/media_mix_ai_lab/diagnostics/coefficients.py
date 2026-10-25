@@ -1,5 +1,6 @@
 """Deterministic coefficient diagnostics for fitted OLS specifications."""
 
+import math
 from collections.abc import Mapping
 
 from media_mix_ai_lab.core.config import ModelConfig
@@ -223,10 +224,11 @@ def _interpret_term(
             f"change in {config.target}, {qualifier}.",
         )
     if config.kind == "log_log":
+        percentage_change = 100 * math.expm1(estimate)
         return (
-            f"approximate % {config.target} per {term} unit",
-            f"A one-unit increase in {term} is associated with approximately a "
-            f"{100 * estimate:.4g}% change in {config.target}, {qualifier}.",
+            f"model-implied % {config.target} per {term} unit",
+            f"A one-unit increase in {term} is associated with a {percentage_change:.4g}% "
+            f"change in {config.target}, {qualifier}.",
         )
     return (
         f"{config.target} units per {term} unit",
