@@ -98,6 +98,30 @@ def test_adstock_search_and_apply():
     assert result.config.adstock["tv_spend"].method == "geometric"
 
 
+def test_adstock_page_renders_visible_scientific_guidance():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Adstock Analysis")
+
+    headings = {item.value for item in app.subheader}
+    assert {
+        "What is adstock?",
+        "How the methods work",
+        "How to read this graph",
+        "How to read raw vs transformed spend",
+        "Why optimize adstock?",
+        "When optimization is not feasible",
+        "Assumptions & limitations",
+    }.issubset(headings)
+    visible_text = "\n".join(item.value for item in app.markdown)
+    assert "A_t = x_t" in visible_text
+    assert "A_t = x_t + alpha * A_(t-1)" in visible_text
+    assert "alpha^((l - theta)^2)" in visible_text
+    assert "one isolated unit of spend" in visible_text
+    assert "final weeks stay untouched" in visible_text
+    assert "Geometric (alpha=0.5)" in app.dataframe[0].value.columns
+    assert "Delayed (alpha=0.5, theta=2)" in app.dataframe[0].value.columns
+
+
 def test_adstock_search_is_invalidated_when_data_changes():
     app = AppTest.from_file(str(APP), default_timeout=30).run()
     navigate(app, "Adstock Analysis")
@@ -194,6 +218,9 @@ def test_model_controls_have_contextual_help_and_render_result_headings():
     assert not app.exception
     assert any(item.value == "Statistical evidence" for item in app.subheader)
     assert any(item.value == "Coefficient estimates" for item in app.subheader)
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    assert not app.exception
+    assert len(app.session_state["model_results"]) == 2
 
 
 def test_adstock_and_diagnostics_controls_explain_splits_and_influence_limits():
@@ -226,6 +253,14 @@ def test_scientific_help_glossary_covers_statistical_and_causal_caveats():
     assert all(
         term in HELP_TEXT["influence_glossary"]
         for term in ("DFBETAS", "Cook's distance", "leverage", "studentized residuals")
+    )
+    assert all(
+        scale in HELP_TEXT["residual_variance"]
+        for scale in (
+            "squared outcome units",
+            "squared log-outcome units",
+            "original outcome units",
+        )
     )
     assert "does not automatically remove" in HELP_TEXT["outlier_policy"]
 

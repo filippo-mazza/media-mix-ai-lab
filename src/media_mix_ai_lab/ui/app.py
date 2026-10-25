@@ -739,8 +739,9 @@ def models() -> None:
         )
         for position, result_json in enumerate(reversed(saved_results), start=1):
             result = ModelResult.model_validate_json(result_json)
-            with st.expander(f"Fit {len(saved_results) - position + 1}", expanded=position == 1):
-                _show_model_result(result)
+            fit_number = len(saved_results) - position + 1
+            with st.expander(f"Fit {fit_number}", expanded=position == 1):
+                _show_model_result(result, fit_number)
                 st.download_button(
                     "Save result as JSON",
                     result_json,
@@ -755,7 +756,7 @@ def models() -> None:
     )
 
 
-def _show_model_result(result: ModelResult) -> None:
+def _show_model_result(result: ModelResult, fit_number: int) -> None:
     st.code(result.equation)
     st.caption(
         "Features and transformations: "
@@ -818,7 +819,7 @@ def _show_model_result(result: ModelResult) -> None:
         help_heading(
             "Coefficient estimates",
             "coefficient_interpretation",
-            key="model_coefficient_estimates",
+            key=f"model_coefficient_estimates_fit_{fit_number}",
         )
         st.dataframe(estimate_rows, hide_index=True, width="stretch")
         st.caption(
@@ -830,7 +831,7 @@ def _show_model_result(result: ModelResult) -> None:
         help_heading(
             "Statistical evidence",
             "statistical_evidence",
-            key="model_statistical_evidence",
+            key=f"model_statistical_evidence_fit_{fit_number}",
         )
         st.dataframe(
             pd.DataFrame(
@@ -867,7 +868,7 @@ def _show_model_result(result: ModelResult) -> None:
         help_heading(
             "Numerical diagnostics",
             "multicollinearity",
-            key="model_numerical_diagnostics",
+            key=f"model_numerical_diagnostics_fit_{fit_number}",
         )
         diagnostic_columns = st.columns(3)
         diagnostic_columns[0].metric(

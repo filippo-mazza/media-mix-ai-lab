@@ -99,7 +99,11 @@ HELP_TEXT = {
         "specifications, "
         "but does not validate assumptions or causal claims."
     ),
-    "residual_variance": ("Average squared in-sample residual scale, in squared outcome units."),
+    "residual_variance": (
+        "Mean squared in-sample residual on the fitted response scale: squared outcome units for "
+        "linear OLS or squared log-outcome units for log-log OLS. It is not comparable to temporal "
+        "errors reported in original outcome units."
+    ),
     "residuals": (
         "A residual is observed minus predicted outcome, in outcome units. Patterns over time can "
         "reveal systematic prediction errors; influence is not attribution."

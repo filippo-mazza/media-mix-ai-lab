@@ -20,14 +20,152 @@ from media_mix_ai_lab.optimization.adstock_search import (
 from media_mix_ai_lab.ui.help_content import HELP_TEXT, help_heading
 
 
+def _adstock_introduction() -> None:
+    st.subheader("What is adstock?")
+    st.write(
+        "Adstock is a deterministic way to represent advertising carryover: a media exposure "
+        "this week can contribute to the transformed media signal in later weeks. This page "
+        "uses weeks as the time unit and treats an impulse as one isolated unit of spend "
+        "followed by weeks of zero spend."
+    )
+    st.write(
+        "Carryover describes timing. It is separate from saturation or diminishing returns, "
+        "which describe how response changes as spend grows. An adstock curve is also not a "
+        "causal sales-response curve; it only transforms the media input used by a model."
+    )
+
+
+def _method_explanation() -> None:
+    st.subheader("How the methods work")
+    st.markdown(
+        "**No adstock** — `A_t = x_t`. Transformed media equals observed weekly spend, so "
+        "there is no carryover. This is always included as the optimization baseline.\n\n"
+        "**Geometric adstock** — `A_t = x_t + alpha * A_(t-1)`, with "
+        "`0 <= alpha < 1`. Alpha is the fraction retained for one more week; `alpha = 0` "
+        "means no carryover. The implementation is recursive and therefore has an infinite "
+        "tail. The live lag horizon limits only the displayed impulse plot. With raw weights, "
+        "the impulse weights are `alpha^lag`; sum-to-one scaling multiplies the recursive "
+        "signal by `1 - alpha`. For `0 < alpha < 1`, half-life is "
+        "`ln(0.5) / ln(alpha)` weeks.\n\n"
+        "**Delayed geometric adstock** — "
+        "`A_t = sum(l=0..L) alpha^((l - theta)^2) * x_(t-l)`, with "
+        "`0 < alpha < 1`. Theta is the peak delay in weeks and `L` is the last included lag. "
+        "Here alpha controls the width around the peak: values nearer 1 spread weight more "
+        "widely; it is not a one-week retention rate. Raw weights use the formula directly. "
+        "Sum-to-one scaling divides the finite weights by their total."
+    )
+    with st.expander("First weeks, history, and normalization details"):
+        st.write(
+            "This page starts both transforms with zero media history. Geometric adstock uses "
+            "an initial state of zero. Delayed geometric uses only lags available since the "
+            "first displayed week, so unavailable pre-dataset terms contribute zero. The "
+            "Models page can accept explicit prior delayed-media values. During chronological "
+            "validation, observed earlier spend carries across split boundaries; future spend "
+            "never contributes to an earlier feature. Normalization changes the numerical "
+            "scale of the transformed signal and therefore the coefficient scale."
+        )
+
+
+def _impulse_guidance(family: str, scaling: str) -> None:
+    st.subheader("How to read this graph")
+    peak = (
+        "Geometric weight peaks immediately at week 0 and then decays."
+        if family == "geometric"
+        else "Delayed geometric weight can peak after week 0 at the selected theta."
+        if family == "delayed_geometric"
+        else "No adstock has weight 1 at week 0 and no later carryover."
+    )
+    scale = (
+        "The displayed weights are normalized across their implemented support."
+        if scaling == "sum_to_one"
+        else "The y-axis shows raw, unnormalized weights."
+    )
+    st.write(
+        "The x-axis is weeks since one unit of media exposure; the y-axis is the weight that "
+        f"the transformation assigns at each lag. {peak} {scale} These are theoretical input "
+        "weights, not estimated sales effects or causal lift."
+    )
+
+
+def _worked_example() -> None:
+    st.markdown("**Miniature impulse example (raw weights)**")
+    st.write(
+        "Suppose spend is 1 in week 0 and 0 afterward. Geometric alpha 0.5 decays "
+        "immediately. Delayed geometric alpha 0.5, theta 2, and L=4 peaks in week 2."
+    )
+    st.dataframe(
+        pd.DataFrame(
+            {
+                "Weeks since exposure": [0, 1, 2, 3, 4],
+                "Spend": [1, 0, 0, 0, 0],
+                "Geometric (alpha=0.5)": [1, 0.5, 0.25, 0.125, 0.0625],
+                "Delayed (alpha=0.5, theta=2)": [0.0625, 0.5, 1, 0.5, 0.0625],
+            }
+        ),
+        hide_index=True,
+        width="stretch",
+    )
+
+
+def _optimization_explanation() -> None:
+    st.subheader("Why optimize adstock?")
+    st.write(
+        "Optimization compares a bounded, deterministic set of channel-specific alpha and "
+        "theta candidates with the no-adstock baseline. Each candidate fits coefficients on "
+        "the earliest weeks and is ranked by validation RMSE in the outcome's original units; "
+        "validation MAE is shown as a supporting diagnostic. Lower validation error means "
+        "better prediction on that validation period, not a more causal or scientifically "
+        "true model. Coefficient signs and p-values never choose the winner."
+    )
+    st.write(
+        "The final weeks stay untouched while candidates are ranked. After selection is "
+        "frozen, **Evaluate selected model on final test** uses that holdout once and locks "
+        "further searches for the dataset. **Apply selected parameters** then copies the "
+        "chosen settings into the editable Models controls; it does not overwrite the source "
+        "data or an existing baseline fit."
+    )
+    st.subheader("When optimization is not feasible")
+    st.write(
+        "A search needs regular weekly dates, finite nonnegative channel spend, enough fitting "
+        "weeks to estimate every coefficient with residual degrees of freedom, at least one "
+        "validation and final-test week, and a full-rank design. Log-log models additionally "
+        "need positive outcome and transformed media values. A multi-channel budget must be "
+        "large enough to vary each channel independently."
+    )
+    st.caption(
+        "Try more history, fewer channels or controls, a larger candidate budget, a smaller "
+        "final-test fraction, or linear OLS when zeros prevent log-log fitting. Fix missing or "
+        "irregular weeks at the source; the app does not silently impute or drop them."
+    )
+
+
+def _limitations() -> None:
+    st.subheader("Assumptions & limitations")
+    st.write(
+        "The transforms assume weekly, regularly spaced observations and channel-specific "
+        "carryover. Results depend on the available prehistory and initial-state convention. "
+        "Correlated channels can make parameters difficult to identify, and a predictive "
+        "winner can be unstable across periods. Delayed adstock truncates history at L; "
+        "geometric adstock is recursive. Log-log fits cannot accept zero outcome or transformed "
+        "media values. These observational models do not establish causal advertising impact."
+    )
+
+
 def adstock_page() -> None:
     st.title("Adstock Analysis")
+    _adstock_introduction()
     frame = st.session_state["dataset"]
     mapping = st.session_state["dataset_mapping"]
     channels = tuple(mapping["channels"])
     explore, optimize = st.tabs(["Explore adstock", "Optimize adstock"])
     with explore:
-        channel = st.selectbox("Channel", channels, help=HELP_TEXT["channel_columns"])
+        _method_explanation()
+        st.markdown("#### Explore a channel and parameter set")
+        channel = st.selectbox(
+            "Channel",
+            channels,
+            help=HELP_TEXT["channel_columns"],
+        )
         family = st.selectbox(
             "Adstock family",
             ["none", "geometric", "delayed_geometric"],
@@ -39,11 +177,32 @@ def adstock_page() -> None:
             0.9,
             0.5,
             0.1,
-            help=HELP_TEXT["adstock_alpha"],
+            help=(
+                HELP_TEXT["adstock_alpha"]
+                + " Geometric alpha is one-week retention; delayed alpha controls width "
+                "around theta."
+            ),
         )
-        lag = st.slider("Lag horizon (weeks)", 0, 12, 8, help=HELP_TEXT["adstock_max_lag"])
+        lag = st.slider(
+            "Lag horizon (weeks)",
+            0,
+            12,
+            8,
+            help=(
+                HELP_TEXT["adstock_max_lag"]
+                if family == "delayed_geometric"
+                else (
+                    "Visible impulse-plot horizon only; geometric adstock has an infinite "
+                    "recursive tail."
+                )
+            ),
+        )
         theta = st.slider(
-            "Delayed peak (weeks)", 0, lag, min(2, lag), help=HELP_TEXT["adstock_theta"]
+            "Delayed peak (weeks)",
+            0,
+            lag,
+            min(2, lag),
+            help=HELP_TEXT["adstock_theta"],
         )
         scaling = st.selectbox(
             "Weight normalization",
@@ -58,6 +217,7 @@ def adstock_page() -> None:
             weight_scaling=scaling,
         )
         weights = adstock_impulse_response(spec, periods=lag + 1)
+        _impulse_guidance(family, scaling)
         st.plotly_chart(
             px.line(
                 weights,
@@ -67,6 +227,14 @@ def adstock_page() -> None:
                 title="Theoretical impulse response · no causal claim",
             ),
             width="stretch",
+        )
+        _worked_example()
+        st.subheader("How to read raw vs transformed spend")
+        st.write(
+            "Both lines use weekly spend-signal units, but normalization changes their scale. "
+            "Carryover can keep transformed spend above zero when current spend is zero, and "
+            "raw geometric weights can make transformed values larger than current spend. "
+            "Every transformed point depends on the selected parameters and earlier history."
         )
         try:
             transformed = apply_adstock(frame[channel], spec)
@@ -103,6 +271,7 @@ def adstock_page() -> None:
         )
         st.session_state["adstock_exploration"] = spec.model_dump(mode="json")
     with optimize:
+        _optimization_explanation()
         selected_channels = tuple(
             st.multiselect(
                 "Channels to calibrate",
@@ -319,3 +488,4 @@ def adstock_page() -> None:
                 file_name="adstock-search.json",
                 mime="application/json",
             )
+    _limitations()
