@@ -97,6 +97,30 @@ def test_adstock_search_and_apply():
     assert result.config.adstock["tv_spend"].method == "geometric"
 
 
+def test_adstock_page_renders_visible_scientific_guidance():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Adstock Analysis")
+
+    headings = {item.value for item in app.subheader}
+    assert {
+        "What is adstock?",
+        "How the methods work",
+        "How to read this graph",
+        "How to read raw vs transformed spend",
+        "Why optimize adstock?",
+        "When optimization is not feasible",
+        "Assumptions & limitations",
+    }.issubset(headings)
+    visible_text = "\n".join(item.value for item in app.markdown)
+    assert "A_t = x_t" in visible_text
+    assert "A_t = x_t + alpha * A_(t-1)" in visible_text
+    assert "alpha^((l - theta)^2)" in visible_text
+    assert "one isolated unit of spend" in visible_text
+    assert "final weeks stay untouched" in visible_text
+    assert "Geometric (alpha=0.5)" in app.dataframe[0].value.columns
+    assert "Delayed (alpha=0.5, theta=2)" in app.dataframe[0].value.columns
+
+
 def test_adstock_search_is_invalidated_when_data_changes():
     app = AppTest.from_file(str(APP), default_timeout=30).run()
     navigate(app, "Adstock Analysis")
