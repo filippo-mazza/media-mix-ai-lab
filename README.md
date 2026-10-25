@@ -42,6 +42,13 @@ accepts a weekly CSV with explicit date, target, channel, and optional control
 mapping. The **Models** section shows pre-fit eligibility and log-domain checks,
 fits OLS or strict log-log OLS, and lets you download each fit with its
 observation accounting, specification, diagnostics, and provenance as JSON.
+The separate **Diagnostics** page evaluates a saved model specification using
+either a chronological holdout fraction or a date cutoff; it never shuffles or
+sorts rows. Inspect MAE, RMSE, WAPE, observed-versus-predicted outcomes, residuals
+over time, residual autocorrelation, and training-design collinearity. Two saved
+evaluations can be compared; differing holdout dates are flagged. Stored
+specifications are re-evaluated against the currently loaded dataset, not their
+original fit data.
 
 ```sh
 uv run pytest
@@ -52,7 +59,7 @@ uv run ruff format --check .
 CI runs the locked install, lint, formatting check, and tests on Python 3.12.
 Tests exercise data reproducibility, schema errors, preservation of inputs,
 configuration validation, OLS coefficient recovery, observation accounting and
-error cases, typed summary tools, and all six Streamlit sections.
+error cases, typed summary tools, and all seven Streamlit sections.
 
 ## Architecture
 
@@ -63,7 +70,7 @@ src/media_mix_ai_lab/
   data/                        Deterministic generation and nonmutating validation
   core/                        Serializable Pydantic model specifications
   modeling/                    OLS engine, future engine protocol, and result contract
-  diagnostics/                 Deterministic coefficient and model-health diagnostics
+  diagnostics/                 Coefficient, model-health, and temporal diagnostics
   optimization/                Reserved for response curves and budget optimization
   ai/                          Provider-neutral conversation and typed tool contracts
 tests/                         Unit and Streamlit AppTest smoke tests
@@ -150,6 +157,35 @@ the current Streamlit session. See the committed
 [negative-media result export](docs/examples/negative-media-result.json) for the
 complete machine-readable shape and supporting evidence.
 
+## Temporal validation and diagnostic limitations
+
+The **Diagnostics** page splits the already ordered weekly observations by a
+fraction or a user-selected cutoff date. It rejects nonweekly, unordered, or
+empty partitions and never shuffles, sorts, imputes, or drops observations.
+OLS coefficients are fitted using training rows only. The current model has no
+learned scaler or imputer: log transforms are deterministic, and adstock for a
+holdout week uses only current and prior media values, including available
+training history. Changing future rows cannot change training coefficients or
+training metrics.
+
+MAE and RMSE are reported in the original target units. WAPE is
+`sum(abs(actual - predicted)) / sum(abs(actual))`; it is undefined when the
+denominator is zero. For log-log OLS, the exponentiated log prediction is on the
+target's original scale but represents a conditional geometric-scale estimate,
+not a bias-corrected arithmetic mean. Training errors are shown separately from
+holdout errors. R² and adjusted R² are undefined when the fitted outcome is
+constant and are displayed as unavailable.
+
+Durbin–Watson and Ljung–Box are calculated on holdout residuals; they describe
+residual serial correlation, not causality or model correctness. Ljung–Box is
+omitted for fewer than eight residuals, and constant residuals make both
+autocorrelation diagnostics undefined. VIF and the condition number use the
+training design only. VIF can be unreliable for small samples; condition numbers
+depend on predictor units and scaling. These are screening indicators, not
+automatic model-selection rules. Comparisons warn when saved evaluations cover
+different holdout dates. A failed model fit is reported rather than silently
+skipped.
+
 ## Statistical assumptions and limitations
 
 These are unweighted, in-sample OLS estimates of conditional associations, not
@@ -168,9 +204,10 @@ holding other terms fixed. They are not ROI or causal lift. Level-control
 coefficients in a log-log model are not elasticities: the displayed finite
 one-unit change is converted with `100 × expm1(coefficient)`, which is the
 model-implied percentage change rather than the small-change approximation
-`100 × coefficient`. No rows are silently cleaned or removed. Adstock, temporal
-validation, and response curves are not implemented. Numerical results remain
-separate from AI interpretations.
+`100 × coefficient`. No rows are silently cleaned or removed. Adstock is a
+deterministic signal transform, temporal validation measures predictive
+generalization, and response curves are not causal attribution. Numerical
+results remain separate from AI interpretations.
 The allowlisted AI-facing tool computes descriptive statistics directly from
 validated data; no remote provider, autonomous dispatcher, or generated code
 execution exists.

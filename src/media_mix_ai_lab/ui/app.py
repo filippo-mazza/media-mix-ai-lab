@@ -25,6 +25,7 @@ from media_mix_ai_lab.modeling.ols import (
     OLSModelEngine,
     summarize_observations,
 )
+from media_mix_ai_lab.ui.diagnostics_page import diagnostics_page
 
 NAVIGATION = (
     (
@@ -39,6 +40,7 @@ NAVIGATION = (
         "Analysis",
         (
             ("Models", ":material/model_training:"),
+            ("Diagnostics", ":material/analytics:"),
             ("AI Assistant", ":material/auto_awesome:"),
             ("ROI Analysis", ":material/finance_mode:"),
         ),
@@ -683,8 +685,11 @@ def _show_model_result(result: ModelResult) -> None:
 
     columns = st.columns(4)
     columns[0].metric("Sample size", result.sample_size)
-    columns[1].metric("R²", f"{result.r_squared:.4f}")
-    columns[2].metric("Adjusted R²", f"{result.adjusted_r_squared:.4f}")
+    columns[1].metric("R²", "—" if result.r_squared is None else f"{result.r_squared:.4f}")
+    columns[2].metric(
+        "Adjusted R²",
+        "—" if result.adjusted_r_squared is None else f"{result.adjusted_r_squared:.4f}",
+    )
     columns[3].metric("Residual variance", f"{result.residual_variance:.4g}")
     accounting = result.observation_accounting
     st.caption(
@@ -887,6 +892,8 @@ def main() -> None:
         explore(frame, mapping, source["kind"])
     elif section == "Models":
         models()
+    elif section == "Diagnostics":
+        diagnostics_page()
     elif section == "AI Assistant":
         assistant()
     else:

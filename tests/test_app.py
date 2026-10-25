@@ -12,8 +12,9 @@ NAVIGATION_INDEX = {
     "Data": 1,
     "Explore": 2,
     "Models": 3,
-    "AI Assistant": 4,
-    "ROI Analysis": 5,
+    "Diagnostics": 4,
+    "AI Assistant": 5,
+    "ROI Analysis": 6,
 }
 
 
@@ -23,7 +24,8 @@ def navigate(app: AppTest, section: str) -> AppTest:
 
 
 @pytest.mark.parametrize(
-    "section", ["Home", "Data", "Explore", "Models", "AI Assistant", "ROI Analysis"]
+    "section",
+    ["Home", "Data", "Explore", "Models", "Diagnostics", "AI Assistant", "ROI Analysis"],
 )
 def test_workbench_sections_render_without_credentials(section):
     app = AppTest.from_file(str(APP), default_timeout=20).run()
@@ -99,6 +101,38 @@ def test_models_report_strict_log_domain_errors():
         for summary in summaries
     )
     assert any(element.label == "Review affected source records" for element in app.expander)
+
+
+def test_diagnostics_is_a_separate_page_and_requires_a_saved_model():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Diagnostics")
+
+    assert not app.exception
+    assert app.main.title[0].value == "Diagnostics"
+    assert not any(button.label == "Fit model" for button in app.button)
+    assert any("Fit a model on the Models page" in item.value for item in app.info)
+
+
+def test_diagnostics_evaluates_and_compares_saved_model_runs():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Models")
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    navigate(app, "Diagnostics")
+    next(button for button in app.button if button.label == "Evaluate holdout").click().run()
+    run_picker = next(element for element in app.selectbox if element.label == "Stored model run")
+    run_picker.set_value(run_picker.options[1]).run()
+    next(button for button in app.button if button.label == "Evaluate holdout").click().run()
+
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 2
+    assert any(table.value["Period"].tolist() == ["Training", "Holdout"] for table in app.dataframe)
+    assert any("Compare two stored evaluations" in item.value for item in app.subheader)
+    assert len(app.session_state["temporal_results"]) == 2
+    assert (
+        app.session_state["temporal_results"][0]["run_label"]
+        != (app.session_state["temporal_results"][1]["run_label"])
+    )
 
 
 def test_models_preview_and_fit_configured_geometric_adstock():

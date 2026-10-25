@@ -143,9 +143,12 @@ class OLSModelEngine:
         }
         condition_number = float(fitted.condition_number)
         residual_degrees_freedom = float(fitted.df_resid)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r_squared = float(fitted.rsquared)
+            adjusted_r_squared = float(fitted.rsquared_adj)
         fitted_metrics = {
-            "r_squared": float(fitted.rsquared),
-            "adjusted_r_squared": float(fitted.rsquared_adj),
+            "r_squared": r_squared if np.isfinite(r_squared) else None,
+            "adjusted_r_squared": (adjusted_r_squared if np.isfinite(adjusted_r_squared) else None),
             "residual_variance": float(fitted.mse_resid),
             "residual_degrees_freedom": residual_degrees_freedom,
             "condition_number": condition_number,
@@ -162,7 +165,7 @@ class OLSModelEngine:
                 },
                 **fitted_metrics,
             }.items()
-            if not np.isfinite(value)
+            if value is not None and not np.isfinite(value)
         ]
         if nonfinite:
             raise ValueError(
