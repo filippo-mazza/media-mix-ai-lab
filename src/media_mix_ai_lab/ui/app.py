@@ -27,6 +27,7 @@ from media_mix_ai_lab.modeling.ols import (
 )
 from media_mix_ai_lab.ui.adstock_page import adstock_page
 from media_mix_ai_lab.ui.diagnostics_page import diagnostics_page
+from media_mix_ai_lab.ui.help_content import HELP_TEXT, help_heading
 
 NAVIGATION = (
     (
@@ -226,7 +227,9 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
     st.title("Data")
     st.write("Upload a weekly CSV or inspect the included synthetic dataset.")
     st.button("Load sample dataset", on_click=_load_sample)
-    uploaded_file = st.file_uploader("Upload a weekly CSV", type=["csv"])
+    uploaded_file = st.file_uploader(
+        "Upload a weekly CSV", type=["csv"], help=HELP_TEXT["weekly_data"]
+    )
     if uploaded_file is not None:
         content = uploaded_file.getvalue()
         try:
@@ -254,12 +257,20 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
                         ),
                         0,
                     )
-                    date_column = st.selectbox("Date column", date_options, index=date_default)
+                    date_column = st.selectbox(
+                        "Date column",
+                        date_options,
+                        index=date_default,
+                        help=HELP_TEXT["date_column"],
+                    )
                     target_default = (
                         numeric_columns.index("revenue") if "revenue" in numeric_columns else 0
                     )
                     target_column = st.selectbox(
-                        "Target / outcome column", numeric_columns, index=target_default
+                        "Target / outcome column",
+                        numeric_columns,
+                        index=target_default,
+                        help=HELP_TEXT["target_column"],
                     )
                     channel_options = [
                         column for column in numeric_columns if column != target_column
@@ -268,12 +279,24 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
                         "Channel columns (select at least one)",
                         channel_options,
                         default=channel_options,
+                        help=HELP_TEXT["channel_columns"],
                     )
                     control_options = [
                         column for column in numeric_columns if column != target_column
                     ]
-                    control_columns = st.multiselect("Control columns (optional)", control_options)
-                    st.selectbox("Observation frequency", ["Weekly"])
+                    control_columns = st.multiselect(
+                        "Control columns (optional)",
+                        control_options,
+                        help=HELP_TEXT["control_columns"],
+                    )
+                    st.selectbox(
+                        "Observation frequency",
+                        ["Weekly"],
+                        help=(
+                            "One observation per week is required by the current model and "
+                            "adstock methods."
+                        ),
+                    )
                     submitted = st.form_submit_button("Validate and use dataset")
                 if submitted:
                     try:
@@ -366,18 +389,27 @@ def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> No
     target = mapping["target"]
     channels = mapping["channels"]
     cols = st.columns(3)
-    cols[0].metric("Weeks", len(frame))
+    cols[0].metric("Weeks", len(frame), help=HELP_TEXT["sample_counts"])
     target_total = frame[target].sum(min_count=1)
     channel_total = frame[list(channels)].sum(axis=1, min_count=1).sum(min_count=1)
-    cols[1].metric(f"Observed {target}", "—" if pd.isna(target_total) else f"{target_total:,.0f}")
+    cols[1].metric(
+        f"Observed {target}",
+        "—" if pd.isna(target_total) else f"{target_total:,.0f}",
+        help="Sum of observed outcome values in the source units; this is not modeled lift.",
+    )
     cols[2].metric(
-        "Observed channel total", "—" if pd.isna(channel_total) else f"{channel_total:,.0f}"
+        "Observed channel total",
+        "—" if pd.isna(channel_total) else f"{channel_total:,.0f}",
+        help="Sum of mapped media spend across all observed weeks and selected channels.",
     )
     series_options = [target, *channels]
     series = st.multiselect(
         "Target and channel series",
         series_options,
         default=series_options,
+        help=(
+            "Choose observed outcome and media columns to plot over time; no effects are estimated."
+        ),
     )
     if series:
         chart = px.line(
@@ -403,7 +435,14 @@ def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> No
     if source_kind == "synthetic" and "is_injected_outlier" in frame.columns:
         st.caption("Dotted red line: deliberately injected outlier; no observations removed.")
     if mapping["controls"]:
-        control = st.selectbox("Inspect a control", list(mapping["controls"]))
+        control = st.selectbox(
+            "Inspect a control",
+            list(mapping["controls"]),
+            help=(
+                "Choose a mapped covariate to inspect its weekly observed values; this is not an "
+                "effect estimate."
+            ),
+        )
         st.plotly_chart(px.line(frame, x=mapping["date"], y=control), width="stretch")
     else:
         st.info("No control columns were mapped.")
@@ -427,16 +466,24 @@ def models() -> None:
         "Model specification",
         ["ols", "log_log"],
         format_func=lambda value: "Linear OLS" if value == "ols" else "Log-log OLS",
+        help=HELP_TEXT["model_specification"],
     )
     target_default = (
         numeric_columns.index(mapping["target"]) if mapping["target"] in numeric_columns else 0
     )
-    target = st.selectbox("Outcome", numeric_columns, index=target_default)
+    target = st.selectbox(
+        "Outcome", numeric_columns, index=target_default, help=HELP_TEXT["outcome"]
+    )
     media_options = [
         column for column in mapping["channels"] if column in numeric_columns and column != target
     ]
     media_default = media_options
-    channels = st.multiselect("Media predictors", media_options, default=media_default)
+    channels = st.multiselect(
+        "Media predictors",
+        media_options,
+        default=media_default,
+        help=HELP_TEXT["media_predictors"],
+    )
     control_options = [
         column for column in mapping["controls"] if column in numeric_columns and column != target
     ]
@@ -444,6 +491,7 @@ def models() -> None:
         "Optional controls",
         [column for column in control_options if column not in channels],
         default=[column for column in control_options if column not in channels],
+        help=HELP_TEXT["optional_controls"],
     )
     adstock_settings: dict[str, AdstockSpec] = {}
     adstock_error = None
@@ -464,6 +512,7 @@ def models() -> None:
                         "delayed_geometric": "Delayed geometric (finite lag)",
                     }.get,
                     key=f"adstock_method_{channel}",
+                    help=HELP_TEXT["adstock_method"],
                 )
                 settings: dict[str, object] = {"method": method}
                 if method != "none":
@@ -475,6 +524,7 @@ def models() -> None:
                             "sum_to_one": "Sum to one",
                         }.get,
                         key=f"adstock_scaling_{channel}",
+                        help=HELP_TEXT["adstock_normalization"],
                     )
                     if method == "geometric":
                         settings["alpha"] = st.number_input(
@@ -484,6 +534,7 @@ def models() -> None:
                             value=0.5,
                             step=0.05,
                             key=f"adstock_alpha_{channel}",
+                            help=HELP_TEXT["adstock_alpha"],
                         )
                         settings["initial_state"] = st.number_input(
                             f"{channel} initial carryover state",
@@ -491,6 +542,7 @@ def models() -> None:
                             max_value=1e12,
                             value=0.0,
                             key=f"adstock_initial_state_{channel}",
+                            help=HELP_TEXT["adstock_initial_state"],
                         )
                     else:
                         settings["alpha"] = st.number_input(
@@ -500,6 +552,7 @@ def models() -> None:
                             value=0.7,
                             step=0.05,
                             key=f"adstock_alpha_{channel}",
+                            help=HELP_TEXT["adstock_alpha"],
                         )
                         settings["max_lag_weeks"] = st.slider(
                             f"{channel} maximum lag (weeks)",
@@ -507,6 +560,7 @@ def models() -> None:
                             max_value=12,
                             value=8,
                             key=f"adstock_lag_{channel}",
+                            help=HELP_TEXT["adstock_max_lag"],
                         )
                         settings["theta"] = st.number_input(
                             f"{channel} theta (weeks)",
@@ -515,10 +569,12 @@ def models() -> None:
                             value=float(min(2, settings["max_lag_weeks"])),
                             step=1.0,
                             key=f"adstock_theta_{channel}",
+                            help=HELP_TEXT["adstock_theta"],
                         )
                         history = st.text_input(
                             f"{channel} prior weekly media values (oldest to newest, optional)",
                             key=f"adstock_history_{channel}",
+                            help=HELP_TEXT["adstock_history"],
                         )
                         settings["historical_values"] = tuple(
                             float(value.strip()) for value in history.split(",") if value.strip()
@@ -526,7 +582,7 @@ def models() -> None:
                 adstock_settings[channel] = AdstockSpec(**settings)
     except (ValueError, OverflowError) as error:
         adstock_error = str(error)
-    intercept = st.checkbox("Include intercept", value=True)
+    intercept = st.checkbox("Include intercept", value=True, help=HELP_TEXT["intercept"])
     with st.expander("Domain sign expectations"):
         st.caption(
             "These are review hypotheses, not mathematical constraints. Choose Either sign "
@@ -542,6 +598,7 @@ def models() -> None:
                     "negative": "Usually negative",
                 }.get,
                 key=f"media_sign_expectation_{channel}",
+                help=HELP_TEXT["sign_expectation"],
             )
             for channel in channels
         }
@@ -575,7 +632,11 @@ def models() -> None:
         st.error(f"Invalid model specification: {error}")
 
     if config is not None and channels:
-        st.subheader("Raw and transformed media signals")
+        help_heading(
+            "Raw and transformed media signals",
+            "adstock_method",
+            key="model_adstock_signal_preview",
+        )
         preview_channel = st.selectbox("Channel preview", channels)
         spec = config.adstock.get(preview_channel, AdstockSpec())
         try:
@@ -671,11 +732,16 @@ def models() -> None:
 
     saved_results = st.session_state.get("model_results", [])
     if saved_results:
-        st.subheader("Fitted results")
+        help_heading(
+            "Fitted results",
+            "coefficient_interpretation",
+            key="model_fitted_results",
+        )
         for position, result_json in enumerate(reversed(saved_results), start=1):
             result = ModelResult.model_validate_json(result_json)
-            with st.expander(f"Fit {len(saved_results) - position + 1}", expanded=position == 1):
-                _show_model_result(result)
+            fit_number = len(saved_results) - position + 1
+            with st.expander(f"Fit {fit_number}", expanded=position == 1):
+                _show_model_result(result, fit_number)
                 st.download_button(
                     "Save result as JSON",
                     result_json,
@@ -690,7 +756,7 @@ def models() -> None:
     )
 
 
-def _show_model_result(result: ModelResult) -> None:
+def _show_model_result(result: ModelResult, fit_number: int) -> None:
     st.code(result.equation)
     st.caption(
         "Features and transformations: "
@@ -711,13 +777,22 @@ def _show_model_result(result: ModelResult) -> None:
         st.caption("Warning codes: " + ", ".join(health.warning_codes))
 
     columns = st.columns(4)
-    columns[0].metric("Sample size", result.sample_size)
-    columns[1].metric("R²", "—" if result.r_squared is None else f"{result.r_squared:.4f}")
+    columns[0].metric("Sample size", result.sample_size, help=HELP_TEXT["sample_size"])
+    columns[1].metric(
+        "R²",
+        "—" if result.r_squared is None else f"{result.r_squared:.4f}",
+        help=HELP_TEXT["r_squared"],
+    )
     columns[2].metric(
         "Adjusted R²",
         "—" if result.adjusted_r_squared is None else f"{result.adjusted_r_squared:.4f}",
+        help=HELP_TEXT["adjusted_r_squared"],
     )
-    columns[3].metric("Residual variance", f"{result.residual_variance:.4g}")
+    columns[3].metric(
+        "Residual variance",
+        f"{result.residual_variance:.4g}",
+        help=HELP_TEXT["residual_variance"],
+    )
     accounting = result.observation_accounting
     st.caption(
         f"Observation accounting: {accounting.n_input} input · "
@@ -741,6 +816,11 @@ def _show_model_result(result: ModelResult) -> None:
         ]
     )
     with estimates:
+        help_heading(
+            "Coefficient estimates",
+            "coefficient_interpretation",
+            key=f"model_coefficient_estimates_fit_{fit_number}",
+        )
         st.dataframe(estimate_rows, hide_index=True, width="stretch")
         st.caption(
             "Coefficients are conditional associations from this specification. Positive "
@@ -748,6 +828,11 @@ def _show_model_result(result: ModelResult) -> None:
         )
 
     with evidence:
+        help_heading(
+            "Statistical evidence",
+            "statistical_evidence",
+            key=f"model_statistical_evidence_fit_{fit_number}",
+        )
         st.dataframe(
             pd.DataFrame(
                 [
@@ -780,13 +865,32 @@ def _show_model_result(result: ModelResult) -> None:
         _show_diagnostic_flags(result, "statistical_evidence")
 
     with numerical:
+        help_heading(
+            "Numerical diagnostics",
+            "multicollinearity",
+            key=f"model_numerical_diagnostics_fit_{fit_number}",
+        )
         diagnostic_columns = st.columns(3)
         diagnostic_columns[0].metric(
-            "Residual degrees of freedom", f"{result.residual_degrees_freedom:g}"
+            "Residual degrees of freedom",
+            f"{result.residual_degrees_freedom:g}",
+            help=(
+                "Fitted observations minus estimated parameters; very low values leave little "
+                "information for residual diagnostics."
+            ),
         )
-        diagnostic_columns[1].metric("Condition number", f"{result.condition_number:.4g}")
+        diagnostic_columns[1].metric(
+            "Condition number",
+            f"{result.condition_number:.4g}",
+            help=HELP_TEXT["multicollinearity"],
+        )
         diagnostic_columns[2].metric(
-            "Design rank", f"{result.design_rank} / {result.parameter_count}"
+            "Design rank",
+            f"{result.design_rank} / {result.parameter_count}",
+            help=(
+                "Rank counts independent design-matrix columns; a rank below parameter count "
+                "signals exact collinearity."
+            ),
         )
         thresholds = result.config.diagnostic_thresholds
         st.caption(

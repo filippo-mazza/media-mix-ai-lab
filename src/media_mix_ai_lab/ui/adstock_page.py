@@ -17,6 +17,7 @@ from media_mix_ai_lab.optimization.adstock_search import (
     search,
     search_specification,
 )
+from media_mix_ai_lab.ui.help_content import HELP_TEXT, help_heading
 
 
 def _adstock_introduction() -> None:
@@ -163,12 +164,12 @@ def adstock_page() -> None:
         channel = st.selectbox(
             "Channel",
             channels,
-            help="The weekly media-spend series to transform; each channel can carry differently.",
+            help=HELP_TEXT["channel_columns"],
         )
         family = st.selectbox(
             "Adstock family",
             ["none", "geometric", "delayed_geometric"],
-            help="Choose identity, recursive decay, or a finite curve with a delayed peak.",
+            help=HELP_TEXT["adstock_method"],
         )
         alpha = st.slider(
             "Geometric alpha / delayed alpha",
@@ -176,26 +177,37 @@ def adstock_page() -> None:
             0.9,
             0.5,
             0.1,
-            help="Geometric: one-week retention. Delayed: width around theta; nearer 1 is wider.",
+            help=(
+                HELP_TEXT["adstock_alpha"]
+                + " Geometric alpha is one-week retention; delayed alpha controls width "
+                "around theta."
+            ),
         )
         lag = st.slider(
             "Lag horizon (weeks)",
             0,
             12,
             8,
-            help="Delayed: last included lag L. Geometric: visible plot horizon only.",
+            help=(
+                HELP_TEXT["adstock_max_lag"]
+                if family == "delayed_geometric"
+                else (
+                    "Visible impulse-plot horizon only; geometric adstock has an infinite "
+                    "recursive tail."
+                )
+            ),
         )
         theta = st.slider(
             "Delayed peak (weeks)",
             0,
             lag,
             min(2, lag),
-            help="Weeks after exposure where delayed-geometric weight reaches its peak.",
+            help=HELP_TEXT["adstock_theta"],
         )
         scaling = st.selectbox(
             "Weight normalization",
             ["raw", "sum_to_one"],
-            help="Raw preserves formula weights; sum-to-one rescales weights and signal magnitude.",
+            help=HELP_TEXT["adstock_normalization"],
         )
         spec = AdstockSpec(
             method=family,
@@ -246,6 +258,7 @@ def adstock_page() -> None:
                 width="stretch",
             )
         half_life = np.log(0.5) / np.log(alpha) if family == "geometric" and 0 < alpha < 1 else None
+        st.caption(HELP_TEXT["adstock_half_life"])
         st.caption(
             f"{channel}: {family}, alpha={spec.alpha:g}, theta={theta}, L={lag}, "
             f"normalization={scaling}; geometric half-life: "
@@ -264,14 +277,35 @@ def adstock_page() -> None:
                 "Channels to calibrate",
                 channels,
                 default=channels[:1],
-                help="Selected channels receive their own candidate parameters and contrasts.",
+                help=HELP_TEXT["channel_columns"],
             )
         )
-        method = st.selectbox("Candidate family", ["geometric", "delayed_geometric", "none"])
-        horizon = st.slider("Search lag horizon", 0, 12, 8)
-        budget = st.number_input("Candidate budget", min_value=1, max_value=100, value=20)
-        holdout = st.slider("Final test fraction", 0.1, 0.4, 0.2, 0.05)
-        kind = st.selectbox("Regression family", ["ols", "log_log"])
+        method = st.selectbox(
+            "Candidate family",
+            ["geometric", "delayed_geometric", "none"],
+            help=HELP_TEXT["adstock_method"],
+        )
+        horizon = st.slider("Search lag horizon", 0, 12, 8, help=HELP_TEXT["adstock_max_lag"])
+        budget = st.number_input(
+            "Candidate budget",
+            min_value=1,
+            max_value=100,
+            value=20,
+            help=HELP_TEXT["candidate_budget"],
+        )
+        holdout = st.slider(
+            "Final test fraction",
+            0.1,
+            0.4,
+            0.2,
+            0.05,
+            help=HELP_TEXT["train_validation_test"],
+        )
+        kind = st.selectbox(
+            "Regression family",
+            ["ols", "log_log"],
+            help=HELP_TEXT["model_specification"],
+        )
         if not selected_channels:
             st.info("Select at least one channel.")
             return
@@ -286,6 +320,11 @@ def adstock_page() -> None:
         final_test_used = st.session_state.get("adstock_final_evaluated_sha256") == current_sha256
         try:
             fit, validation, test = partition(frame, mapping["date"], holdout)
+            help_heading(
+                "Chronological fit, validation, and final test",
+                "train_validation_test",
+                key="adstock_optimization_partitions",
+            )
             cols = st.columns(4)
             for col, label, count in zip(
                 cols,
@@ -293,7 +332,7 @@ def adstock_page() -> None:
                 [len(frame), len(fit), len(validation), len(test)],
                 strict=True,
             ):
-                col.metric(label, count)
+                col.metric(label, count, help=HELP_TEXT["sample_counts"])
             st.caption(
                 " · ".join(
                     f"{name}: {part[mapping['date']].iloc[0].date()} to "
@@ -316,7 +355,8 @@ def adstock_page() -> None:
             )
             st.caption(
                 f"At most {count} candidate fits including no-adstock baseline. "
-                "Warm-up exclusions: 0; zero prehistory, observed past spend carried across splits."
+                "Warm-up exclusions: 0; zero prehistory, observed past spend carried across "
+                "splits. " + HELP_TEXT["optimization_objective"]
             )
         except ValueError as error:
             st.error(str(error))
@@ -349,6 +389,11 @@ def adstock_page() -> None:
                     st.error(f"Search failed: {error}")
         if result:
             st.success("Search complete")
+            help_heading(
+                "Candidate results",
+                "candidate_status",
+                key="adstock_candidate_results",
+            )
             rows = [
                 {
                     "rank": index,
@@ -368,6 +413,7 @@ def adstock_page() -> None:
                 hide_index=True,
                 width="stretch",
             )
+            st.caption(HELP_TEXT["optimization_objective"])
             comparison = pd.DataFrame(
                 [
                     {
@@ -389,6 +435,7 @@ def adstock_page() -> None:
                 ),
                 width="stretch",
             )
+            st.caption(HELP_TEXT["error_metrics"])
             if result["final_test"] is None:
                 st.info(
                     "Selection is frozen from validation results. The final test remains unused."
