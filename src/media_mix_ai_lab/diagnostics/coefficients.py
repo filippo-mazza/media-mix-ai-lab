@@ -253,15 +253,22 @@ def _interpret_term(
             "reference point is meaningful.",
         )
     if role == "media" and config.kind == "log_log":
+        media_signal = _media_signal_name(config, original_media)
+        scale = (
+            "conditional elasticity"
+            if media_signal == original_media
+            else f"conditional elasticity of {media_signal}"
+        )
         return (
-            "conditional elasticity",
-            f"A 1% increase in {original_media} is associated with approximately a "
+            scale,
+            f"A 1% increase in {media_signal} is associated with approximately a "
             f"{estimate:.4g}% change in {config.target}, {qualifier}.",
         )
     if role == "media":
+        media_signal = _media_signal_name(config, original_media)
         return (
-            f"{config.target} units per {original_media} unit",
-            f"A one-unit increase in {original_media} is associated with a {estimate:.4g}-unit "
+            f"{config.target} units per {media_signal} unit",
+            f"A one-unit increase in {media_signal} is associated with a {estimate:.4g}-unit "
             f"change in {config.target}, {qualifier}.",
         )
     if config.kind == "log_log":
@@ -276,3 +283,14 @@ def _interpret_term(
         f"A one-unit increase in {term} is associated with a {estimate:.4g}-unit change in "
         f"{config.target}, {qualifier}.",
     )
+
+
+def _media_signal_name(config: ModelConfig, original_media: str | None) -> str:
+    """Describe the fitted media predictor in its actual adstocked units."""
+    if original_media is None:
+        return "media predictor"
+    spec = config.adstock.get(original_media)
+    if spec is None or spec.method == "none":
+        return original_media
+    method = "geometric" if spec.method == "geometric" else "delayed geometric"
+    return f"{method}-adstocked {original_media} signal ({spec.weight_scaling} weights)"

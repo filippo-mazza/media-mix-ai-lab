@@ -320,14 +320,10 @@ def test_ols_supports_a_configured_no_intercept():
     assert result.term_assessments["tv_spend"].role == "media"
 
 
-def test_ols_rejects_missing_selected_column_and_unimplemented_adstock():
+def test_ols_rejects_missing_selected_column():
     frame = pd.DataFrame({"revenue": [2, 4, 8], "tv_spend": [1, 2, 3]})
     config = ModelConfig(target="revenue", channels=("tv_spend",), controls=("missing",))
     with pytest.raises(ValueError, match="Selected model columns are missing"):
-        OLSModelEngine().fit(frame, config)
-
-    config = ModelConfig(target="revenue", channels=("tv_spend",), controls=(), adstock_decay=0.5)
-    with pytest.raises(ValueError, match="Adstock is not supported"):
         OLSModelEngine().fit(frame, config)
 
 

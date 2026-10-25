@@ -92,6 +92,23 @@ observations. The selected outcome and predictors must also be numeric, finite,
 and nonmissing. Exact rank deficiency and designs without residual degrees of
 freedom are rejected rather than returning unidentified coefficients.
 
+On **Models**, each selected media channel can independently use no adstock,
+recursive geometric adstock, or delayed geometric adstock. None is the identity.
+Geometric adstock uses `a[t] = x[t] + alpha × a[t-1]`, with `0 ≤ alpha < 1`,
+an explicit initial state defaulting to zero, and no finite truncation. For
+`0 < alpha < 1`, its displayed half-life is `log(0.5) / log(alpha)`. Delayed
+geometric adstock uses `w[l] = alpha^((l-theta)^2)` for lags `0..L`, then
+`a[t] = Σ w[l] × x[t-l]`; `0 < alpha < 1`, `0 ≤ theta ≤ L`, and the suggested
+initial values are `alpha=0.7`, `theta=2`, and `L=8` weeks. Missing prior
+history is zero; optional delayed-adstock history is entered oldest to newest.
+Weights are raw by default; `sum_to_one` is an explicit, persisted alternative.
+Geometric history is recursive (not truncated), while delayed geometric uses
+the displayed finite lag window. Adstock requires ordered, unique weekly dates
+with no missing weeks, and negative media spend is rejected. The preview shows
+raw and transformed signals, early-window behavior, and the corresponding
+impulse response. The model result retains all per-channel settings, and its
+dataset hash is based on the unchanged source data.
+
 Before fitting, the workbench reports total and eligible observations,
 nonpositive values by logged variable, and the unique affected source rows. A
 successful result records input, fitted, and excluded counts plus one explicit
