@@ -25,6 +25,7 @@ from media_mix_ai_lab.modeling.ols import (
     OLSModelEngine,
     summarize_observations,
 )
+from media_mix_ai_lab.ui.adstock_page import adstock_page
 from media_mix_ai_lab.ui.diagnostics_page import diagnostics_page
 
 NAVIGATION = (
@@ -40,6 +41,7 @@ NAVIGATION = (
         "Analysis",
         (
             ("Models", ":material/model_training:"),
+            ("Adstock Analysis", ":material/show_chart:"),
             ("Diagnostics", ":material/analytics:"),
             ("AI Assistant", ":material/auto_awesome:"),
             ("ROI Analysis", ":material/finance_mode:"),
@@ -397,6 +399,9 @@ def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> No
 
 def models() -> None:
     st.title("Models")
+    if st.button("Open Adstock Analysis"):
+        _navigate("Adstock Analysis")
+        st.rerun()
     st.write("Fit transparent OLS specifications to the currently loaded dataset.")
     frame = st.session_state["dataset"]
     mapping: ColumnMapping = st.session_state["dataset_mapping"]
@@ -542,6 +547,16 @@ def models() -> None:
             media_sign_expectations=sign_expectations,
             adstock=adstock_settings,
         )
+        applied = st.session_state.get("adstock_applied_config")
+        if applied is not None:
+            selected = ModelConfig.model_validate(applied)
+            if (selected.target, selected.channels, selected.date_column) == (
+                config.target,
+                config.channels,
+                config.date_column,
+            ):
+                config = config.model_copy(update={"adstock": selected.adstock})
+                st.info("Applied calibrated adstock settings are active for this fit.")
         accounting = summarize_observations(frame, config)
     except ValueError as error:
         config = None
@@ -879,7 +894,9 @@ def main() -> None:
         if source["kind"] == "upload":
             validate_weekly_dataset(frame, mapping)
         else:
-            validate_dataset(frame, allow_negative_target_media=section == "Models")
+            validate_dataset(
+                frame, allow_negative_target_media=section in {"Models", "Adstock Analysis"}
+            )
     except ValueError as error:
         st.error(f"Dataset validation failed: {error}")
         st.button("Restore synthetic sample", on_click=_load_sample)
@@ -892,6 +909,8 @@ def main() -> None:
         explore(frame, mapping, source["kind"])
     elif section == "Models":
         models()
+    elif section == "Adstock Analysis":
+        adstock_page()
     elif section == "Diagnostics":
         diagnostics_page()
     elif section == "AI Assistant":
