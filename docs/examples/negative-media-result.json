@@ -1,0 +1,95 @@
+{
+  "config": {
+    "schema_version": 1,
+    "kind": "ols",
+    "target": "revenue",
+    "channels": ["tv_spend"],
+    "controls": [],
+    "intercept": true,
+    "media_sign_expectations": {},
+    "diagnostic_thresholds": {
+      "near_zero_residual_df": 5,
+      "large_relative_standard_error": 1.0,
+      "poor_condition_number": 100000000.0,
+      "near_zero_estimate": 1e-12
+    },
+    "adstock_decay": 0.0,
+    "max_lag_weeks": 0,
+    "seed": 42
+  },
+  "dataset_sha256": "98df58f79fe836d41243b6c71a9c20a7c98c88ea20b3e90f278c81970212286c",
+  "coefficients": {"const": 100.0, "tv_spend": -1.9999999999999962},
+  "standard_errors": {
+    "const": 2.2399913662138107e-14,
+    "tv_spend": 1.8699086639850313e-15
+  },
+  "confidence_intervals": {
+    "const": [99.99999999999996, 100.00000000000004],
+    "tv_spend": [-2.0, -1.9999999999999922]
+  },
+  "term_roles": {"const": "intercept", "tv_spend": "media"},
+  "sample_size": 20,
+  "r_squared": 1.0,
+  "adjusted_r_squared": 1.0,
+  "residual_variance": 2.325211343744778e-27,
+  "equation": "revenue = β₀ + β_tv_spend × tv_spend",
+  "transformations": {"revenue": "original level", "tv_spend": "original level"},
+  "package_versions": {
+    "python": "3.12.14",
+    "numpy": "2.5.4",
+    "pandas": "2.3.3",
+    "scipy": "1.18.1",
+    "statsmodels": "0.14.6"
+  },
+  "term_assessments": {
+    "const": {
+      "term": "const",
+      "role": "intercept",
+      "estimate": 100.0,
+      "standard_error": 2.2399913662138107e-14,
+      "confidence_interval": [99.99999999999996, 100.00000000000004],
+      "ci_spans_zero": false,
+      "scale": "revenue units",
+      "interpretation": "Expected revenue units when every included predictor equals zero; interpret only if that reference point is meaningful.",
+      "expected_direction": null
+    },
+    "tv_spend": {
+      "term": "tv_spend",
+      "role": "media",
+      "estimate": -1.9999999999999962,
+      "standard_error": 1.8699086639850313e-15,
+      "confidence_interval": [-2.0, -1.9999999999999922],
+      "ci_spans_zero": false,
+      "scale": "revenue units per tv_spend unit",
+      "interpretation": "A one-unit increase in tv_spend is associated with a -2-unit change in revenue, holding the other included terms constant; this is an association, not causation.",
+      "expected_direction": "positive"
+    }
+  },
+  "diagnostic_flags": [
+    {
+      "code": "MEDIA_UNEXPECTED_SIGN",
+      "category": "business_plausibility",
+      "severity": "review",
+      "message": "tv_spend: unexpected sign—investigate; sign expectations are review hypotheses, not constraints.",
+      "evidence": {
+        "term": "tv_spend",
+        "estimate": -1.9999999999999962,
+        "expected_direction": "positive"
+      }
+    }
+  ],
+  "health_summary": {
+    "status": "review",
+    "headline": "Review the flagged statistical or domain assumptions.",
+    "flag_count": 1,
+    "warning_codes": ["MEDIA_UNEXPECTED_SIGN"]
+  },
+  "residual_degrees_freedom": 18.0,
+  "condition_number": 25.019509309802487,
+  "design_rank": 2,
+  "parameter_count": 2,
+  "warnings": [
+    "Classical OLS standard errors and confidence intervals assume a correctly specified model with independent, homoskedastic errors; weekly dependence and omitted confounders may invalidate them.",
+    "tv_spend: unexpected sign—investigate; sign expectations are review hypotheses, not constraints."
+  ]
+}

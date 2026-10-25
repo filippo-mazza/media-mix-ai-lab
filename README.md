@@ -62,7 +62,7 @@ src/media_mix_ai_lab/
   data/                        Deterministic generation and nonmutating validation
   core/                        Serializable Pydantic model specifications
   modeling/                    OLS engine, future engine protocol, and result contract
-  diagnostics/                 Reserved for statistical diagnostic tools
+  diagnostics/                 Deterministic coefficient and model-health diagnostics
   optimization/                Reserved for response curves and budget optimization
   ai/                          Provider-neutral conversation and typed tool contracts
 tests/                         Unit and Streamlit AppTest smoke tests
@@ -91,12 +91,32 @@ observations. The selected outcome and predictors must also be numeric, finite,
 and nonmissing. Exact rank deficiency and designs without residual degrees of
 freedom are rejected rather than returning unidentified coefficients.
 
-The result reports estimates, classical standard errors and 95% confidence
-intervals, sample size, R², adjusted R², and residual variance
-(residual sum of squares divided by residual degrees of freedom). It also
-records the fitted equation, exact feature transformations, configuration,
-dataset fingerprint, and Python/numerical package versions. Fits are retained in
-the current Streamlit session and can be downloaded as JSON.
+The result separates coefficient estimates and units, classical statistical
+evidence, numerical diagnostics, and business-plausibility hypotheses. Each term
+shows its standard error, 95% confidence interval, whether the interval spans
+zero, and a deterministic noncausal interpretation. The app intentionally omits
+p-values rather than turning an arbitrary cutoff into a causal verdict.
+
+Media terms default to an expected positive direction, configurable per channel
+as positive, negative, or either sign. A conflicting estimate is labelled
+`MEDIA_UNEXPECTED_SIGN` and “unexpected sign—investigate”; it remains a valid
+estimate rather than a mathematical error. The basic assessment also flags
+intervals spanning zero, large standard errors relative to estimates, low
+residual degrees of freedom, poor conditioning, no-intercept R² conventions, and
+retained labelled outliers. Exact singularity and undefined log inputs remain
+hard model-specification errors. A nonfinite fitted output is rejected with the
+explicit `NONFINITE_ESTIMATE` numerical-violation code instead of being written
+as misleading or invalid JSON.
+
+Every flag has a stable code, category, severity, and supporting evidence. The
+model-health status and thresholds are deterministic and included in the JSON
+download alongside sample size, R², adjusted R², residual variance, fitted
+equation, transformations, configuration, dataset fingerprint, and package
+versions. “Healthy” only means that these limited checks did not fire; it does
+not validate causal identification or all OLS assumptions. Fits are retained in
+the current Streamlit session. See the committed
+[negative-media result export](docs/examples/negative-media-result.json) for the
+complete machine-readable shape and supporting evidence.
 
 ## Statistical assumptions and limitations
 
@@ -113,9 +133,12 @@ the corresponding predictor, conditional on the other selected terms. In
 log-log models, media slopes are conditional elasticities: approximately the
 percent change in outcome for a one-percent change in that media predictor,
 holding other terms fixed. They are not ROI or causal lift. Level-control
-coefficients in a log-log model are not elasticities. No rows are silently
-cleaned or removed. Adstock, temporal validation, and response curves are not
-implemented. Numerical results remain separate from AI interpretations.
+coefficients in a log-log model are not elasticities: the displayed finite
+one-unit change is converted with `100 × expm1(coefficient)`, which is the
+model-implied percentage change rather than the small-change approximation
+`100 × coefficient`. No rows are silently cleaned or removed. Adstock, temporal
+validation, and response curves are not implemented. Numerical results remain
+separate from AI interpretations.
 The allowlisted AI-facing tool computes descriptive statistics directly from
 validated data; no remote provider, autonomous dispatcher, or generated code
 execution exists.
@@ -198,3 +221,5 @@ and uses the lockfile with the selected Python version.
 ![Home workbench](docs/screenshots/home.png)
 
 ![Synthetic dataset exploration](docs/screenshots/explore.png)
+
+![Model diagnostic warning summary](docs/screenshots/model-diagnostics.png)

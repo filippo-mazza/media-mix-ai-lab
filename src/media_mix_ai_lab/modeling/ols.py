@@ -10,6 +10,7 @@ import pandas as pd
 import statsmodels.api as sm
 
 from media_mix_ai_lab.core.config import ModelConfig
+from media_mix_ai_lab.diagnostics.coefficients import assess_coefficients
 from media_mix_ai_lab.modeling.interfaces import ModelResult
 
 
@@ -95,6 +96,50 @@ class OLSModelEngine:
             name: (float(intervals.loc[name, 0]), float(intervals.loc[name, 1]))
             for name in fitted.params.index
         }
+        condition_number = float(fitted.condition_number)
+        residual_degrees_freedom = float(fitted.df_resid)
+        fitted_metrics = {
+            "r_squared": float(fitted.rsquared),
+            "adjusted_r_squared": float(fitted.rsquared_adj),
+            "residual_variance": float(fitted.mse_resid),
+            "residual_degrees_freedom": residual_degrees_freedom,
+            "condition_number": condition_number,
+        }
+        nonfinite = [
+            name
+            for name, value in {
+                **{f"coefficient:{name}": value for name, value in coefficients.items()},
+                **{f"standard_error:{name}": value for name, value in standard_errors.items()},
+                **{
+                    f"confidence_interval:{name}:{bound}": value
+                    for name, interval in confidence_intervals.items()
+                    for bound, value in zip(("lower", "upper"), interval, strict=True)
+                },
+                **fitted_metrics,
+            }.items()
+            if not np.isfinite(value)
+        ]
+        if nonfinite:
+            raise ValueError(
+                "NONFINITE_ESTIMATE numerical violation: the fit produced nonfinite "
+                f"outputs ({', '.join(nonfinite)}). Review scaling and model specification."
+            )
+
+        retained_outliers = (
+            int(data["is_injected_outlier"].eq(True).sum()) if "is_injected_outlier" in data else 0
+        )
+        term_assessments, diagnostic_flags, health_summary = assess_coefficients(
+            config=config,
+            coefficients=coefficients,
+            standard_errors=standard_errors,
+            confidence_intervals=confidence_intervals,
+            term_roles=roles,
+            residual_degrees_freedom=residual_degrees_freedom,
+            condition_number=condition_number,
+            design_rank=rank,
+            parameter_count=parameter_count,
+            retained_labeled_outliers=retained_outliers,
+        )
         warnings = [
             "Classical OLS standard errors and confidence intervals assume a correctly "
             "specified model with independent, homoskedastic errors; weekly dependence "
@@ -102,18 +147,7 @@ class OLSModelEngine:
         ]
         if config.kind == "log_log":
             warnings.append("Log-log media slopes are conditional elasticities, not causal ROI.")
-        if not config.intercept:
-            warnings.append(
-                "The model omits an intercept; R² and adjusted R² use the uncentered "
-                "statsmodels convention."
-            )
-        if fitted.condition_number > 1e12:
-            warnings.append(
-                "The design matrix has a very large condition number; estimates may be "
-                "numerically unstable."
-            )
-        if "is_injected_outlier" in data and data["is_injected_outlier"].eq(True).any():
-            warnings.append("Labeled injected outlier(s) were retained in the fit.")
+        warnings.extend(flag.message for flag in diagnostic_flags)
 
         equation = self._equation(config)
         return ModelResult(
@@ -124,9 +158,9 @@ class OLSModelEngine:
             confidence_intervals=confidence_intervals,
             term_roles=roles,
             sample_size=sample_size,
-            r_squared=float(fitted.rsquared),
-            adjusted_r_squared=float(fitted.rsquared_adj),
-            residual_variance=float(fitted.mse_resid),
+            r_squared=fitted_metrics["r_squared"],
+            adjusted_r_squared=fitted_metrics["adjusted_r_squared"],
+            residual_variance=fitted_metrics["residual_variance"],
             equation=equation,
             transformations=transformations,
             package_versions={
@@ -136,6 +170,13 @@ class OLSModelEngine:
                 "scipy": version("scipy"),
                 "statsmodels": version("statsmodels"),
             },
+            term_assessments=term_assessments,
+            diagnostic_flags=diagnostic_flags,
+            health_summary=health_summary,
+            residual_degrees_freedom=residual_degrees_freedom,
+            condition_number=condition_number,
+            design_rank=rank,
+            parameter_count=parameter_count,
             warnings=tuple(warnings),
         )
 

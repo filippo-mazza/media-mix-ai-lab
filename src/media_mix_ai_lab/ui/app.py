@@ -420,6 +420,24 @@ def models() -> None:
         default=[column for column in control_options if column not in channels],
     )
     intercept = st.checkbox("Include intercept", value=True)
+    with st.expander("Domain sign expectations"):
+        st.caption(
+            "These are review hypotheses, not mathematical constraints. Choose Either sign "
+            "when a negative media association is plausible in context."
+        )
+        sign_expectations = {
+            channel: st.selectbox(
+                f"{channel} expected direction",
+                ["positive", "either", "negative"],
+                format_func={
+                    "positive": "Usually positive",
+                    "either": "Either sign",
+                    "negative": "Usually negative",
+                }.get,
+                key=f"media_sign_expectation_{channel}",
+            )
+            for channel in channels
+        }
     if st.button("Fit model"):
         try:
             config = ModelConfig(
@@ -428,6 +446,7 @@ def models() -> None:
                 channels=tuple(channels),
                 controls=tuple(controls),
                 intercept=intercept,
+                media_sign_expectations=sign_expectations,
             )
             result = OLSModelEngine().fit(frame, config)
             st.session_state.setdefault("model_results", []).append(
@@ -463,37 +482,155 @@ def _show_model_result(result: ModelResult) -> None:
         "Features and transformations: "
         + ", ".join(f"{name}: {transform}" for name, transform in result.transformations.items())
     )
+    health = result.health_summary
+    health_message = (
+        f"**Model health: {health.status.upper()}** — {health.headline} "
+        f"Structured flags: {health.flag_count}."
+    )
+    if health.status == "healthy":
+        st.success(health_message)
+    elif health.status == "unstable":
+        st.error(health_message)
+    else:
+        st.warning(health_message)
+    if health.warning_codes:
+        st.caption("Warning codes: " + ", ".join(health.warning_codes))
+
     columns = st.columns(4)
     columns[0].metric("Sample size", result.sample_size)
     columns[1].metric("R²", f"{result.r_squared:.4f}")
     columns[2].metric("Adjusted R²", f"{result.adjusted_r_squared:.4f}")
     columns[3].metric("Residual variance", f"{result.residual_variance:.4g}")
-    coefficients = pd.DataFrame(
+    estimates, evidence, numerical, plausibility = st.tabs(
+        ["Estimates", "Statistical evidence", "Numerical diagnostics", "Business plausibility"]
+    )
+    estimate_rows = pd.DataFrame(
         [
             {
                 "Term": term,
-                "Role": result.term_roles[term],
-                "Estimate": estimate,
-                "Standard error": result.standard_errors[term],
-                "95% CI lower": result.confidence_intervals[term][0],
-                "95% CI upper": result.confidence_intervals[term][1],
+                "Role": assessment.role,
+                "Estimate": assessment.estimate,
+                "Scale / units": assessment.scale,
+                "Interpretation": assessment.interpretation,
             }
-            for term, estimate in result.coefficients.items()
+            for term, assessment in result.term_assessments.items()
         ]
     )
-    st.dataframe(coefficients, hide_index=True, width="stretch")
-    if result.config.kind == "log_log":
-        st.caption("Log-log media slopes are conditional elasticities, not causal ROI.")
-    for warning in result.warnings:
-        st.warning(warning)
+    with estimates:
+        st.dataframe(estimate_rows, hide_index=True, width="stretch")
+        st.caption(
+            "Coefficients are conditional associations from this specification. Positive "
+            "estimates and high R² do not prove causal lift."
+        )
+
+    with evidence:
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Term": term,
+                        "Standard error": assessment.standard_error,
+                        "95% CI lower": assessment.confidence_interval[0],
+                        "95% CI upper": assessment.confidence_interval[1],
+                        "CI spans zero": "Yes" if assessment.ci_spans_zero else "No",
+                    }
+                    for term, assessment in result.term_assessments.items()
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        st.caption(
+            "Classical 95% OLS intervals assume a correctly specified model with independent, "
+            "homoskedastic errors. They measure sampling uncertainty under those assumptions; "
+            "they do not establish causality."
+        )
+        _show_diagnostic_flags(result, "statistical_evidence")
+
+    with numerical:
+        diagnostic_columns = st.columns(3)
+        diagnostic_columns[0].metric(
+            "Residual degrees of freedom", f"{result.residual_degrees_freedom:g}"
+        )
+        diagnostic_columns[1].metric("Condition number", f"{result.condition_number:.4g}")
+        diagnostic_columns[2].metric(
+            "Design rank", f"{result.design_rank} / {result.parameter_count}"
+        )
+        thresholds = result.config.diagnostic_thresholds
+        st.caption(
+            f"Review thresholds: residual df ≤ {thresholds.near_zero_residual_df}; "
+            f"condition number ≥ {thresholds.poor_condition_number:.4g}; relative standard "
+            f"error ≥ {thresholds.large_relative_standard_error:g}. Exact singular designs "
+            "remain hard errors."
+        )
+        _show_diagnostic_flags(result, "numerical_diagnostics")
+
+    with plausibility:
+        media_assessments = [
+            assessment
+            for assessment in result.term_assessments.values()
+            if assessment.role == "media"
+        ]
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Media term": assessment.term,
+                        "Estimate": assessment.estimate,
+                        "Expected direction": assessment.expected_direction,
+                        "Assessment": (
+                            "Unexpected sign—investigate"
+                            if any(
+                                flag.code == "MEDIA_UNEXPECTED_SIGN"
+                                and flag.evidence.get("term") == assessment.term
+                                for flag in result.diagnostic_flags
+                            )
+                            else "No sign hypothesis triggered"
+                        ),
+                    }
+                    for assessment in media_assessments
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+        st.caption(
+            "Sign expectations are configurable business hypotheses. A negative media "
+            "coefficient is allowed and may be justified; investigate timing, confounding, "
+            "collinearity, targeting, and data quality before interpretation."
+        )
+        _show_diagnostic_flags(result, "business_plausibility")
+
+    flag_messages = {flag.message for flag in result.diagnostic_flags}
+    with st.expander("Assumptions and limitations"):
+        for warning in result.warnings:
+            if warning not in flag_messages:
+                st.warning(warning)
     with st.expander("Model specification and provenance"):
         st.json(
             {
                 "specification": result.config.model_dump(mode="json"),
                 "dataset_sha256": result.dataset_sha256,
                 "package_versions": result.package_versions,
+                "diagnostic_thresholds": result.config.diagnostic_thresholds.model_dump(
+                    mode="json"
+                ),
             }
         )
+
+
+def _show_diagnostic_flags(result: ModelResult, category: str) -> None:
+    flags = [flag for flag in result.diagnostic_flags if flag.category == category]
+    if not flags:
+        st.success("No flags in this category.")
+        return
+    for flag in flags:
+        evidence = ", ".join(f"{name}={value}" for name, value in flag.evidence.items())
+        message = f"**{flag.code}** — {flag.message}\n\nEvidence: {evidence}"
+        if flag.severity == "unstable":
+            st.error(message)
+        else:
+            st.warning(message)
 
 
 def assistant() -> None:
