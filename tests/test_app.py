@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from media_mix_ai_lab.modeling.interfaces import ModelResult
+
 APP = Path(__file__).resolve().parents[1] / "app.py"
 NAVIGATION_INDEX = {
     "Home": 0,
@@ -58,6 +60,12 @@ def test_models_fit_and_save_a_result():
     assert app.session_state["model_results"]
     assert any(metric.label == "Sample size" for metric in app.metric)
     assert any(button.label == "Save result as JSON" for button in app.get("download_button"))
+    result = ModelResult.model_validate_json(app.session_state["model_results"][-1])
+    assert result.health_summary.flag_count == len(result.diagnostic_flags)
+    assert result.health_summary.warning_codes
+    assert all(flag.evidence for flag in result.diagnostic_flags)
+    assert len(app.dataframe) >= 3
+    assert any("Model health:" in warning.value for warning in app.warning)
 
 
 def test_models_report_strict_log_domain_errors():

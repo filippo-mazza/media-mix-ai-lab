@@ -23,6 +23,9 @@ def test_model_configuration_round_trip():
         {"controls": ("tv_spend",)},
         {"execute_python": "print(1)"},
         {"max_lag_weeks": -1},
+        {"media_sign_expectations": {"unknown_channel": "positive"}},
+        {"media_sign_expectations": {"tv_spend": "impossible"}},
+        {"diagnostic_thresholds": {"poor_condition_number": 1}},
     ],
 )
 def test_model_config_rejects_invalid_settings(settings):

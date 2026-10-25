@@ -1,1 +1,1 @@
-"""Diagnostics components for Media Mix AI Lab."""
+"""Deterministic statistical diagnostics for Media Mix AI Lab."""
