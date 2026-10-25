@@ -101,6 +101,23 @@ def test_models_report_strict_log_domain_errors():
     assert any(element.label == "Review affected source records" for element in app.expander)
 
 
+def test_models_preview_and_fit_configured_geometric_adstock():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Models")
+    method = next(
+        element for element in app.selectbox if element.label == "tv_spend adstock method"
+    )
+    method.set_value("geometric").run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
+
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 2
+    result = ModelResult.model_validate_json(app.session_state["model_results"][-1])
+    assert result.config.adstock["tv_spend"].method == "geometric"
+    assert "recursive geometric adstock" in result.transformations["tv_spend"]
+    assert any("Geometric half-life:" in item.value for item in app.caption)
+
+
 def test_invalid_dataset_has_actionable_recovery():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.session_state["dataset"] = app.session_state["dataset"].drop(columns="revenue")

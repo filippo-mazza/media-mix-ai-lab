@@ -3,26 +3,39 @@ from pandas.testing import assert_frame_equal
 from pydantic import ValidationError
 
 from media_mix_ai_lab.ai.interfaces import SummaryRequest, summarize_column
-from media_mix_ai_lab.core.config import ModelConfig
+from media_mix_ai_lab.core.config import AdstockSpec, ModelConfig
 from media_mix_ai_lab.data.synthetic import generate_sample_data
 
 
 def test_model_configuration_round_trip():
-    config = ModelConfig(kind="log_log", adstock_decay=0.5, max_lag_weeks=8)
+    config = ModelConfig(
+        kind="log_log",
+        adstock={
+            "tv_spend": AdstockSpec(
+                method="delayed_geometric",
+                alpha=0.7,
+                max_lag_weeks=8,
+                theta=2,
+                weight_scaling="sum_to_one",
+            )
+        },
+    )
     assert ModelConfig.model_validate_json(config.model_dump_json()) == config
 
 
 @pytest.mark.parametrize(
     "settings",
     [
-        {"adstock_decay": 1},
-        {"adstock_decay": -0.1},
+        {"adstock": {"tv_spend": {"method": "geometric", "alpha": 1}}},
+        {"adstock": {"tv_spend": {"method": "delayed_geometric", "alpha": 0}}},
+        {"adstock": {"tv_spend": {"method": "delayed_geometric", "theta": 9}}},
+        {"adstock": {"unknown": {"method": "geometric"}}},
         {"kind": "unknown"},
         {"channels": ()},
         {"channels": ("revenue",)},
         {"controls": ("tv_spend",)},
         {"execute_python": "print(1)"},
-        {"max_lag_weeks": -1},
+        {"adstock": {"tv_spend": {"method": "delayed_geometric", "max_lag_weeks": 13}}},
         {"media_sign_expectations": {"unknown_channel": "positive"}},
         {"media_sign_expectations": {"tv_spend": "impossible"}},
         {"diagnostic_thresholds": {"poor_condition_number": 1}},

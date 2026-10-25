@@ -1,10 +1,11 @@
 {
   "config": {
-    "schema_version": 1,
+    "schema_version": 2,
     "kind": "ols",
     "target": "revenue",
     "channels": ["tv_spend"],
     "controls": [],
+    "date_column": "date",
     "intercept": true,
     "media_sign_expectations": {},
     "diagnostic_thresholds": {
@@ -13,8 +14,7 @@
       "poor_condition_number": 100000000.0,
       "near_zero_estimate": 1e-12
     },
-    "adstock_decay": 0.0,
-    "max_lag_weeks": 0,
+    "adstock": {},
     "seed": 42
   },
   "dataset_sha256": "98df58f79fe836d41243b6c71a9c20a7c98c88ea20b3e90f278c81970212286c",

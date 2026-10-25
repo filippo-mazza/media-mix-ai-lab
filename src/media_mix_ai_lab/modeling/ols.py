@@ -11,6 +11,7 @@ import statsmodels.api as sm
 
 from media_mix_ai_lab.core.config import ModelConfig
 from media_mix_ai_lab.diagnostics.coefficients import assess_coefficients
+from media_mix_ai_lab.modeling.adstock import transform_media_frame
 from media_mix_ai_lab.modeling.interfaces import (
     AffectedObservation,
     ModelResult,
@@ -35,9 +36,6 @@ class OLSModelEngine:
             raise ValueError("Cannot fit OLS: the dataset is empty.")
         if not data.columns.is_unique:
             raise ValueError("Cannot fit OLS: column names must be unique.")
-        if config.adstock_decay or config.max_lag_weeks:
-            raise ValueError("Adstock is not supported by this OLS specification.")
-
         features = (*config.channels, *config.controls)
         selected = (config.target, *features)
         missing = [column for column in selected if column not in data.columns]
@@ -52,7 +50,13 @@ class OLSModelEngine:
             ):
                 raise ValueError(f"{column} must contain numeric, finite, nonmissing values.")
 
-        accounting = summarize_observations(data, config)
+        if config.kind == "ols":
+            for channel in config.channels:
+                if (data[channel] < 0).any():
+                    raise ValueError(f"{channel} cannot contain negative media spend.")
+
+        model_data = transform_media_frame(data, config)
+        accounting = _summarize_transformed_observations(model_data, config)
         if config.kind == "log_log" and accounting.n_eligible < accounting.n_input:
             invalid = [
                 f"{column}: {count} nonpositive value(s)"
@@ -84,15 +88,15 @@ class OLSModelEngine:
                     "Transformed media predictor names collide with selected controls: "
                     f"{', '.join(sorted(collisions))}. Rename the conflicting columns."
                 )
-            y = np.log(data[config.target].astype(float)).rename(f"log({config.target})")
+            y = np.log(model_data[config.target].astype(float)).rename(f"log({config.target})")
             design = pd.DataFrame(index=data.index)
             for column in config.channels:
-                design[f"log({column})"] = np.log(data[column].astype(float))
+                design[f"log({column})"] = np.log(model_data[column].astype(float))
             for column in config.controls:
-                design[column] = data[column].astype(float)
+                design[column] = model_data[column].astype(float)
         else:
-            y = data[config.target].astype(float).rename(config.target)
-            design = data.loc[:, features].astype(float).copy()
+            y = model_data[config.target].astype(float).rename(config.target)
+            design = model_data.loc[:, features].astype(float).copy()
 
         roles = {
             (f"log({column})" if config.kind == "log_log" else column): "media"
@@ -101,10 +105,7 @@ class OLSModelEngine:
         roles.update({column: "control" for column in config.controls})
         transformations = {
             config.target: "natural log" if config.kind == "log_log" else "original level",
-            **{
-                column: "natural log" if config.kind == "log_log" else "original level"
-                for column in config.channels
-            },
+            **{column: self._media_transformation(config, column) for column in config.channels},
             **{column: "original level" for column in config.controls},
         }
         if config.intercept:
@@ -239,14 +240,48 @@ class OLSModelEngine:
     def _equation(config: ModelConfig) -> str:
         logged = config.kind == "log_log"
         lhs = f"log({config.target})" if logged else config.target
-        terms = [
-            f"β_{f'log({column})' if logged else column} × {f'log({column})' if logged else column}"
-            for column in config.channels
-        ]
+        terms = []
+        for column in config.channels:
+            media_term = OLSModelEngine._media_term(config, column)
+            coefficient = f"log({column})" if logged else column
+            predictor = f"log({media_term})" if logged else media_term
+            terms.append(f"β_{coefficient} × {predictor}")
         terms.extend(f"β_{column} × {column}" for column in config.controls)
         if config.intercept:
             terms.insert(0, "β₀")
         return f"{lhs} = {' + '.join(terms)}"
+
+    @staticmethod
+    def _media_term(config: ModelConfig, column: str) -> str:
+        spec = config.adstock.get(column)
+        if spec is None or spec.method == "none":
+            return column
+        return f"adstock({column})"
+
+    @staticmethod
+    def _media_transformation(config: ModelConfig, column: str) -> str:
+        spec = config.adstock.get(column)
+        if spec is None or spec.method == "none":
+            return "natural log" if config.kind == "log_log" else "original level"
+        adstock = "original level"
+        if spec is not None and spec.method == "geometric":
+            adstock = (
+                f"recursive geometric adstock (alpha={spec.alpha:g}, "
+                f"initial state={spec.initial_state:g}, "
+                f"{spec.weight_scaling}; no finite truncation)"
+            )
+        elif spec is not None and spec.method == "delayed_geometric":
+            boundary = (
+                "zero prehistory"
+                if not spec.historical_values
+                else f"{len(spec.historical_values)} supplied historical week(s)"
+            )
+            adstock = (
+                f"delayed geometric adstock (alpha={spec.alpha:g}, "
+                f"theta={spec.theta:g}, max lag={spec.max_lag_weeks} weeks, "
+                f"{spec.weight_scaling}, {boundary})"
+            )
+        return f"{adstock}, then natural log" if config.kind == "log_log" else adstock
 
     @staticmethod
     def _fingerprint(data: pd.DataFrame) -> str:
@@ -261,7 +296,18 @@ class OLSModelEngine:
 
 
 def summarize_observations(data: pd.DataFrame, config: ModelConfig) -> ObservationAccounting:
-    """Count log-domain eligibility and the unique affected rows without mutation."""
+    """Count log-domain eligibility on transformed media without mutating source data."""
+    if config.kind == "ols":
+        for channel in config.channels:
+            if channel in data.columns and (data[channel] < 0).any():
+                raise ValueError(f"{channel} cannot contain negative media spend.")
+    transformed = transform_media_frame(data, config)
+    return _summarize_transformed_observations(transformed, config)
+
+
+def _summarize_transformed_observations(
+    data: pd.DataFrame, config: ModelConfig
+) -> ObservationAccounting:
     columns = (config.target, *config.channels)
     positions_by_column = {
         column: np.flatnonzero(data[column].to_numpy(dtype=float) <= 0) for column in columns
@@ -272,8 +318,10 @@ def summarize_observations(data: pd.DataFrame, config: ModelConfig) -> Observati
     affected_rows = []
     for position in affected_positions:
         date = None
-        if "date" in data.columns and not pd.isna(data["date"].iloc[position]):
-            value = data["date"].iloc[position]
+        if config.date_column in data.columns and not pd.isna(
+            data[config.date_column].iloc[position]
+        ):
+            value = data[config.date_column].iloc[position]
             date = value.isoformat() if hasattr(value, "isoformat") else str(value)
         affected_rows.append(
             AffectedObservation(

@@ -2,12 +2,13 @@
 
 import hashlib
 import html
+import math
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from media_mix_ai_lab.core.config import ModelConfig
+from media_mix_ai_lab.core.config import AdstockSpec, ModelConfig
 from media_mix_ai_lab.data.synthetic import generate_sample_data
 from media_mix_ai_lab.data.validation import validate_dataset
 from media_mix_ai_lab.data.workspace import (
@@ -17,6 +18,7 @@ from media_mix_ai_lab.data.workspace import (
     read_csv_upload,
     validate_weekly_dataset,
 )
+from media_mix_ai_lab.modeling.adstock import adstock_impulse_response, apply_adstock
 from media_mix_ai_lab.modeling.interfaces import ModelResult
 from media_mix_ai_lab.modeling.ols import (
     ModelFitError,
@@ -423,6 +425,80 @@ def models() -> None:
         [column for column in control_options if column not in channels],
         default=[column for column in control_options if column not in channels],
     )
+    adstock_settings: dict[str, AdstockSpec] = {}
+    with st.expander("Per-channel adstock transforms"):
+        st.caption(
+            "Suggested starting values (not fitted estimates): geometric alpha 0.5; "
+            "delayed-geometric alpha 0.7, theta 2, and maximum lag 8 weeks."
+        )
+        for channel in channels:
+            st.markdown(f"**{channel}**")
+            method = st.selectbox(
+                f"{channel} adstock method",
+                ["none", "geometric", "delayed_geometric"],
+                format_func={
+                    "none": "None",
+                    "geometric": "Geometric (recursive)",
+                    "delayed_geometric": "Delayed geometric (finite lag)",
+                }.get,
+                key=f"adstock_method_{channel}",
+            )
+            settings: dict[str, object] = {"method": method}
+            if method != "none":
+                settings["weight_scaling"] = st.selectbox(
+                    f"{channel} weight scaling",
+                    ["raw", "sum_to_one"],
+                    format_func={"raw": "Raw weights (default)", "sum_to_one": "Sum to one"}.get,
+                    key=f"adstock_scaling_{channel}",
+                )
+                if method == "geometric":
+                    settings["alpha"] = st.number_input(
+                        f"{channel} alpha",
+                        min_value=0.0,
+                        max_value=0.999999,
+                        value=0.5,
+                        step=0.05,
+                        key=f"adstock_alpha_{channel}",
+                    )
+                    settings["initial_state"] = st.number_input(
+                        f"{channel} initial carryover state",
+                        min_value=0.0,
+                        max_value=1e12,
+                        value=0.0,
+                        key=f"adstock_initial_state_{channel}",
+                    )
+                else:
+                    settings["alpha"] = st.number_input(
+                        f"{channel} alpha",
+                        min_value=0.000001,
+                        max_value=0.999999,
+                        value=0.7,
+                        step=0.05,
+                        key=f"adstock_alpha_{channel}",
+                    )
+                    settings["max_lag_weeks"] = st.slider(
+                        f"{channel} maximum lag (weeks)",
+                        min_value=0,
+                        max_value=12,
+                        value=8,
+                        key=f"adstock_lag_{channel}",
+                    )
+                    settings["theta"] = st.number_input(
+                        f"{channel} theta (weeks)",
+                        min_value=0.0,
+                        max_value=float(settings["max_lag_weeks"]),
+                        value=float(min(2, settings["max_lag_weeks"])),
+                        step=1.0,
+                        key=f"adstock_theta_{channel}",
+                    )
+                    history = st.text_input(
+                        f"{channel} prior weekly media values (oldest to newest, optional)",
+                        key=f"adstock_history_{channel}",
+                    )
+                    settings["historical_values"] = tuple(
+                        float(value.strip()) for value in history.split(",") if value.strip()
+                    )
+            adstock_settings[channel] = AdstockSpec(**settings)
     intercept = st.checkbox("Include intercept", value=True)
     with st.expander("Domain sign expectations"):
         st.caption(
@@ -450,12 +526,67 @@ def models() -> None:
             target=target,
             channels=tuple(channels),
             controls=tuple(controls),
+            date_column=mapping["date"],
             intercept=intercept,
             media_sign_expectations=sign_expectations,
+            adstock=adstock_settings,
         )
         accounting = summarize_observations(frame, config)
     except ValueError as error:
+        config = None
         st.error(f"Invalid model specification: {error}")
+
+    if config is not None and channels:
+        st.subheader("Raw and transformed media signals")
+        preview_channel = st.selectbox("Channel preview", channels)
+        spec = config.adstock.get(preview_channel, AdstockSpec())
+        try:
+            transformed_signal = apply_adstock(frame[preview_channel], spec)
+            signal = pd.DataFrame(
+                {
+                    "Date": frame[mapping["date"]],
+                    "Raw spend": frame[preview_channel],
+                    "Transformed signal": transformed_signal,
+                }
+            )
+            st.plotly_chart(
+                px.line(signal, x="Date", y=["Raw spend", "Transformed signal"]),
+                width="stretch",
+            )
+            weights = adstock_impulse_response(spec)
+            st.plotly_chart(
+                px.bar(
+                    weights, x="Lag (weeks)", y="Weight", title="Impulse response / lag weights"
+                ),
+                width="stretch",
+            )
+            if spec.method == "geometric" and spec.alpha > 0:
+                half_life = math.log(0.5) / math.log(spec.alpha)
+                st.caption(f"Geometric half-life: {half_life:.2f} weeks.")
+            elif spec.method == "geometric":
+                st.caption("Geometric half-life: 0 weeks at alpha = 0.")
+            if spec.method == "geometric":
+                st.caption(
+                    f"Recursive filter starts from initial state {spec.initial_state:g}; "
+                    "the chart shows 13 lags, but the recurrence is not truncated."
+                )
+            elif spec.method == "delayed_geometric":
+                boundary = (
+                    "zero prior history"
+                    if not spec.historical_values
+                    else f"{len(spec.historical_values)} supplied prior week(s)"
+                )
+                st.caption(
+                    f"Finite {spec.max_lag_weeks}-week window; {boundary}. "
+                    "Any unspecified older history is zero; no future lags are used."
+                )
+            else:
+                st.caption("No adstock: the transformed series is identical to raw spend.")
+            st.caption(
+                "Preview includes the early-window boundary behavior; source data is unchanged."
+            )
+        except ValueError as error:
+            st.error(f"Cannot preview media transform: {error}")
 
     if accounting is not None:
         st.subheader("Observation eligibility and log-domain checks")
@@ -517,7 +648,7 @@ def models() -> None:
     st.caption(
         "Log-log models take natural logs of the outcome and media predictors; selected "
         "controls remain in their original units. No observations are removed. "
-        "Adstock, temporal validation, and response curves are not implemented."
+        "Adstock is a deterministic signal transform, not a causal attribution method."
     )
 
 
