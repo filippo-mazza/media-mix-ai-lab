@@ -422,3 +422,21 @@ def test_consecutive_navigation_emits_distinct_collapse_scripts():
     first = app.get("html")[0].proto.body
     navigate(app, "Explore")
     assert app.get("html")[0].proto.body != first
+
+
+def test_outlier_sensitivity_button_and_results():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Models")
+    assert any("Fit a baseline model" in item.value for item in app.info)
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    before = app.session_state["model_results"][-1]
+    next(
+        button for button in app.button if button.label == "Run outlier sensitivity analysis"
+    ).click().run()
+    assert not app.exception
+    analysis = json.loads(app.session_state["outlier_sensitivity"])
+    assert len(analysis["removed_rows"]) <= analysis["max_removals"] == 5
+    assert analysis["stop_reason"]
+    assert any("not selection-adjusted" in item.value for item in app.warning)
+    assert app.session_state["model_results"][-1] == before
+    assert len(app.session_state["dataset"]) == 104
