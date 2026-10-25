@@ -118,6 +118,33 @@ def test_models_preview_and_fit_configured_geometric_adstock():
     assert any("Geometric half-life:" in item.value for item in app.caption)
 
 
+@pytest.mark.parametrize(
+    "history",
+    [
+        "not-a-number",
+        "-1",
+        "1,2,3,4,5,6,7,8,9",
+    ],
+)
+def test_models_report_invalid_adstock_history_without_crashing(history):
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    navigate(app, "Models")
+    method = next(
+        element for element in app.selectbox if element.label == "tv_spend adstock method"
+    )
+    method.set_value("delayed_geometric").run()
+    history_input = next(
+        element
+        for element in app.text_input
+        if element.label == "tv_spend prior weekly media values (oldest to newest, optional)"
+    )
+    history_input.set_value(history).run()
+
+    assert not app.exception
+    assert "Invalid adstock settings" in app.error[0].value
+    assert next(button for button in app.button if button.label == "Fit model").disabled
+
+
 def test_invalid_dataset_has_actionable_recovery():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     app.session_state["dataset"] = app.session_state["dataset"].drop(columns="revenue")

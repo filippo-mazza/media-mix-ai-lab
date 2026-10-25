@@ -102,7 +102,7 @@ def test_ols_fits_transformed_media_and_preserves_controls_and_source_data():
     dates = pd.date_range("2024-01-01", periods=len(spend), freq="7D")
     signal = apply_adstock(
         pd.Series(spend),
-        AdstockSpec(method="geometric", alpha=0.4),
+        AdstockSpec(method="geometric", alpha=0.4, weight_scaling="sum_to_one"),
     )
     frame = pd.DataFrame(
         {
@@ -117,7 +117,9 @@ def test_ols_fits_transformed_media_and_preserves_controls_and_source_data():
         target="revenue",
         channels=("tv_spend",),
         controls=("promotion",),
-        adstock={"tv_spend": AdstockSpec(method="geometric", alpha=0.4)},
+        adstock={
+            "tv_spend": AdstockSpec(method="geometric", alpha=0.4, weight_scaling="sum_to_one")
+        },
     )
 
     result = OLSModelEngine().fit(frame, config)
@@ -126,7 +128,42 @@ def test_ols_fits_transformed_media_and_preserves_controls_and_source_data():
     assert result.coefficients["promotion"] == pytest.approx(3.0)
     assert "recursive geometric adstock" in result.transformations["tv_spend"]
     assert result.config.adstock["tv_spend"].alpha == 0.4
+    assessment = result.term_assessments["tv_spend"]
+    assert "sum_to_one weights" in assessment.scale
+    assert "geometric-adstocked tv_spend signal" in assessment.interpretation
     pd.testing.assert_frame_equal(frame, original)
+
+
+def test_log_log_assessment_describes_elasticity_of_adstocked_signal():
+    rng = np.random.default_rng(31)
+    spend = rng.uniform(1.0, 10.0, 60)
+    promotion = np.tile([0.0, 1.0], 30)
+    spec = AdstockSpec(method="geometric", alpha=0.35, weight_scaling="sum_to_one")
+    transformed = apply_adstock(pd.Series(spend), spec).to_numpy()
+    revenue = np.exp(1.1 + 0.6 * np.log(transformed) + 0.1 * promotion)
+    frame = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=len(spend), freq="7D"),
+            "revenue": revenue,
+            "tv_spend": spend,
+            "promotion": promotion,
+        }
+    )
+    config = ModelConfig(
+        kind="log_log",
+        target="revenue",
+        channels=("tv_spend",),
+        controls=("promotion",),
+        adstock={"tv_spend": spec},
+    )
+
+    result = OLSModelEngine().fit(frame, config)
+    assessment = result.term_assessments["log(tv_spend)"]
+
+    assert assessment.scale == (
+        "conditional elasticity of geometric-adstocked tv_spend signal (sum_to_one weights)"
+    )
+    assert "1% increase in geometric-adstocked tv_spend signal" in assessment.interpretation
 
 
 def test_adstock_ols_requires_valid_weekly_dates_and_rejects_negative_spend():

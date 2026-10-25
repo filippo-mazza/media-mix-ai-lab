@@ -426,79 +426,86 @@ def models() -> None:
         default=[column for column in control_options if column not in channels],
     )
     adstock_settings: dict[str, AdstockSpec] = {}
-    with st.expander("Per-channel adstock transforms"):
-        st.caption(
-            "Suggested starting values (not fitted estimates): geometric alpha 0.5; "
-            "delayed-geometric alpha 0.7, theta 2, and maximum lag 8 weeks."
-        )
-        for channel in channels:
-            st.markdown(f"**{channel}**")
-            method = st.selectbox(
-                f"{channel} adstock method",
-                ["none", "geometric", "delayed_geometric"],
-                format_func={
-                    "none": "None",
-                    "geometric": "Geometric (recursive)",
-                    "delayed_geometric": "Delayed geometric (finite lag)",
-                }.get,
-                key=f"adstock_method_{channel}",
+    adstock_error = None
+    try:
+        with st.expander("Per-channel adstock transforms"):
+            st.caption(
+                "Suggested starting values (not fitted estimates): geometric alpha 0.5; "
+                "delayed-geometric alpha 0.7, theta 2, and maximum lag 8 weeks."
             )
-            settings: dict[str, object] = {"method": method}
-            if method != "none":
-                settings["weight_scaling"] = st.selectbox(
-                    f"{channel} weight scaling",
-                    ["raw", "sum_to_one"],
-                    format_func={"raw": "Raw weights (default)", "sum_to_one": "Sum to one"}.get,
-                    key=f"adstock_scaling_{channel}",
+            for channel in channels:
+                st.markdown(f"**{channel}**")
+                method = st.selectbox(
+                    f"{channel} adstock method",
+                    ["none", "geometric", "delayed_geometric"],
+                    format_func={
+                        "none": "None",
+                        "geometric": "Geometric (recursive)",
+                        "delayed_geometric": "Delayed geometric (finite lag)",
+                    }.get,
+                    key=f"adstock_method_{channel}",
                 )
-                if method == "geometric":
-                    settings["alpha"] = st.number_input(
-                        f"{channel} alpha",
-                        min_value=0.0,
-                        max_value=0.999999,
-                        value=0.5,
-                        step=0.05,
-                        key=f"adstock_alpha_{channel}",
+                settings: dict[str, object] = {"method": method}
+                if method != "none":
+                    settings["weight_scaling"] = st.selectbox(
+                        f"{channel} weight scaling",
+                        ["raw", "sum_to_one"],
+                        format_func={
+                            "raw": "Raw weights (default)",
+                            "sum_to_one": "Sum to one",
+                        }.get,
+                        key=f"adstock_scaling_{channel}",
                     )
-                    settings["initial_state"] = st.number_input(
-                        f"{channel} initial carryover state",
-                        min_value=0.0,
-                        max_value=1e12,
-                        value=0.0,
-                        key=f"adstock_initial_state_{channel}",
-                    )
-                else:
-                    settings["alpha"] = st.number_input(
-                        f"{channel} alpha",
-                        min_value=0.000001,
-                        max_value=0.999999,
-                        value=0.7,
-                        step=0.05,
-                        key=f"adstock_alpha_{channel}",
-                    )
-                    settings["max_lag_weeks"] = st.slider(
-                        f"{channel} maximum lag (weeks)",
-                        min_value=0,
-                        max_value=12,
-                        value=8,
-                        key=f"adstock_lag_{channel}",
-                    )
-                    settings["theta"] = st.number_input(
-                        f"{channel} theta (weeks)",
-                        min_value=0.0,
-                        max_value=float(settings["max_lag_weeks"]),
-                        value=float(min(2, settings["max_lag_weeks"])),
-                        step=1.0,
-                        key=f"adstock_theta_{channel}",
-                    )
-                    history = st.text_input(
-                        f"{channel} prior weekly media values (oldest to newest, optional)",
-                        key=f"adstock_history_{channel}",
-                    )
-                    settings["historical_values"] = tuple(
-                        float(value.strip()) for value in history.split(",") if value.strip()
-                    )
-            adstock_settings[channel] = AdstockSpec(**settings)
+                    if method == "geometric":
+                        settings["alpha"] = st.number_input(
+                            f"{channel} alpha",
+                            min_value=0.0,
+                            max_value=0.999999,
+                            value=0.5,
+                            step=0.05,
+                            key=f"adstock_alpha_{channel}",
+                        )
+                        settings["initial_state"] = st.number_input(
+                            f"{channel} initial carryover state",
+                            min_value=0.0,
+                            max_value=1e12,
+                            value=0.0,
+                            key=f"adstock_initial_state_{channel}",
+                        )
+                    else:
+                        settings["alpha"] = st.number_input(
+                            f"{channel} alpha",
+                            min_value=0.000001,
+                            max_value=0.999999,
+                            value=0.7,
+                            step=0.05,
+                            key=f"adstock_alpha_{channel}",
+                        )
+                        settings["max_lag_weeks"] = st.slider(
+                            f"{channel} maximum lag (weeks)",
+                            min_value=0,
+                            max_value=12,
+                            value=8,
+                            key=f"adstock_lag_{channel}",
+                        )
+                        settings["theta"] = st.number_input(
+                            f"{channel} theta (weeks)",
+                            min_value=0.0,
+                            max_value=float(settings["max_lag_weeks"]),
+                            value=float(min(2, settings["max_lag_weeks"])),
+                            step=1.0,
+                            key=f"adstock_theta_{channel}",
+                        )
+                        history = st.text_input(
+                            f"{channel} prior weekly media values (oldest to newest, optional)",
+                            key=f"adstock_history_{channel}",
+                        )
+                        settings["historical_values"] = tuple(
+                            float(value.strip()) for value in history.split(",") if value.strip()
+                        )
+                adstock_settings[channel] = AdstockSpec(**settings)
+    except (ValueError, OverflowError) as error:
+        adstock_error = str(error)
     intercept = st.checkbox("Include intercept", value=True)
     with st.expander("Domain sign expectations"):
         st.caption(
@@ -521,6 +528,8 @@ def models() -> None:
     config = None
     accounting = None
     try:
+        if adstock_error is not None:
+            raise ValueError(f"Invalid adstock settings: {adstock_error}")
         config = ModelConfig(
             kind=kind,
             target=target,
