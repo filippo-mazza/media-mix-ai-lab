@@ -1,11 +1,14 @@
 """Typed contracts for fitted models, coefficient assessments, and diagnostics."""
 
-from typing import Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from media_mix_ai_lab.core.config import ModelConfig
+
+PValue = Annotated[FiniteFloat, Field(ge=0, le=1)]
+SignificanceCode = Literal["***", "**", "*", ".", ""]
 
 
 class TermAssessment(BaseModel):
@@ -17,8 +20,11 @@ class TermAssessment(BaseModel):
     role: Literal["intercept", "media", "control"]
     estimate: FiniteFloat
     standard_error: FiniteFloat = Field(ge=0)
+    t_statistic: FiniteFloat | None
     confidence_interval: tuple[FiniteFloat, FiniteFloat]
     ci_spans_zero: bool
+    p_value: PValue | None
+    significance_code: SignificanceCode
     scale: str
     interpretation: str
     expected_direction: Literal["positive", "negative", "either"] | None = None
@@ -55,7 +61,10 @@ class ModelResult(BaseModel):
     dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     coefficients: dict[str, FiniteFloat]
     standard_errors: dict[str, FiniteFloat]
+    t_statistics: dict[str, FiniteFloat | None]
     confidence_intervals: dict[str, tuple[FiniteFloat, FiniteFloat]]
+    p_values: dict[str, PValue | None]
+    significance_codes: dict[str, SignificanceCode]
     term_roles: dict[str, str]
     sample_size: int = Field(ge=1)
     r_squared: FiniteFloat

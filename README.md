@@ -93,9 +93,17 @@ freedom are rejected rather than returning unidentified coefficients.
 
 The result separates coefficient estimates and units, classical statistical
 evidence, numerical diagnostics, and business-plausibility hypotheses. Each term
-shows its standard error, 95% confidence interval, whether the interval spans
-zero, and a deterministic noncausal interpretation. The app intentionally omits
-p-values rather than turning an arbitrary cutoff into a causal verdict.
+shows its standard error, t-statistic, 95% confidence interval, whether the
+interval spans zero, its classical two-sided t-test p-value, an R-style
+significance code, and a deterministic noncausal interpretation. The engine uses
+the fitted Statsmodels `tvalues` and `pvalues` directly and retains their full
+numeric precision in JSON; the UI displays very small p-values as `<0.001`.
+Significance codes use the familiar
+`***` p ≤ 0.001, `**` p ≤ 0.01, `*` p ≤ 0.05, and `.` p ≤ 0.10 thresholds.
+They summarize evidence for H₀: coefficient = 0, conditional on the selected
+model and the displayed classical OLS assumptions. Time-series dependence and
+multiple testing can make them misleading. Stars do not measure effect size or
+turn an association into a causal result.
 
 Media terms default to an expected positive direction, configurable per channel
 as positive, negative, or either sign. A conflicting estimate is labelled
@@ -223,3 +231,5 @@ and uses the lockfile with the selected Python version.
 ![Synthetic dataset exploration](docs/screenshots/explore.png)
 
 ![Model diagnostic warning summary](docs/screenshots/model-diagnostics.png)
+
+![OLS statistical evidence with p-values](docs/screenshots/model-statistical-evidence.png)

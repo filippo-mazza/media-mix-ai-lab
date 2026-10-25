@@ -66,6 +66,13 @@ def test_models_fit_and_save_a_result():
     assert all(flag.evidence for flag in result.diagnostic_flags)
     assert len(app.dataframe) >= 3
     assert any("Model health:" in warning.value for warning in app.warning)
+    evidence = next(
+        table.value
+        for table in app.dataframe
+        if {"t-statistic", "p-value", "Signif."}.issubset(table.value.columns)
+    )
+    assert "<0.001" in set(evidence["p-value"])
+    assert "***" in set(evidence["Signif."])
 
 
 def test_models_report_strict_log_domain_errors():

@@ -91,6 +91,14 @@ class OLSModelEngine:
         fitted = sm.OLS(y, design, hasconst=config.intercept).fit()
         coefficients = fitted.params.to_dict()
         standard_errors = fitted.bse.to_dict()
+        t_statistics = {
+            name: float(value) if np.isfinite(value) else None
+            for name, value in fitted.tvalues.items()
+        }
+        p_values = {
+            name: float(value) if np.isfinite(value) else None
+            for name, value in fitted.pvalues.items()
+        }
         intervals = fitted.conf_int()
         confidence_intervals = {
             name: (float(intervals.loc[name, 0]), float(intervals.loc[name, 1]))
@@ -132,7 +140,9 @@ class OLSModelEngine:
             config=config,
             coefficients=coefficients,
             standard_errors=standard_errors,
+            t_statistics=t_statistics,
             confidence_intervals=confidence_intervals,
+            p_values=p_values,
             term_roles=roles,
             residual_degrees_freedom=residual_degrees_freedom,
             condition_number=condition_number,
@@ -141,8 +151,9 @@ class OLSModelEngine:
             retained_labeled_outliers=retained_outliers,
         )
         warnings = [
-            "Classical OLS standard errors and confidence intervals assume a correctly "
-            "specified model with independent, homoskedastic errors; weekly dependence "
+            "Classical OLS standard errors, confidence intervals, and two-sided t-test "
+            "p-values assume a correctly specified model with independent, homoskedastic "
+            "errors (and normal errors for exact finite-sample inference); weekly dependence "
             "and omitted confounders may invalidate them."
         ]
         if config.kind == "log_log":
@@ -155,7 +166,12 @@ class OLSModelEngine:
             dataset_sha256=self._fingerprint(data),
             coefficients={name: float(value) for name, value in coefficients.items()},
             standard_errors={name: float(value) for name, value in standard_errors.items()},
+            t_statistics=t_statistics,
             confidence_intervals=confidence_intervals,
+            p_values=p_values,
+            significance_codes={
+                name: assessment.significance_code for name, assessment in term_assessments.items()
+            },
             term_roles=roles,
             sample_size=sample_size,
             r_squared=fitted_metrics["r_squared"],

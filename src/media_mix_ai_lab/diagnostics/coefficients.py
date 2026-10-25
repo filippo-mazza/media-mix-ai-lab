@@ -16,7 +16,9 @@ def assess_coefficients(
     config: ModelConfig,
     coefficients: Mapping[str, float],
     standard_errors: Mapping[str, float],
+    t_statistics: Mapping[str, float | None],
     confidence_intervals: Mapping[str, tuple[float, float]],
+    p_values: Mapping[str, float | None],
     term_roles: Mapping[str, str],
     residual_degrees_freedom: float,
     condition_number: float,
@@ -39,7 +41,9 @@ def assess_coefficients(
 
     for term, estimate in coefficients.items():
         standard_error = standard_errors[term]
+        t_statistic = t_statistics[term]
         lower, upper = confidence_intervals[term]
+        p_value = p_values[term]
         role = term_roles[term]
         ci_spans_zero = lower <= 0 <= upper
         original_media = media_terms.get(term)
@@ -60,12 +64,34 @@ def assess_coefficients(
             role=role,
             estimate=estimate,
             standard_error=standard_error,
+            t_statistic=t_statistic,
             confidence_interval=(lower, upper),
             ci_spans_zero=ci_spans_zero,
+            p_value=p_value,
+            significance_code=significance_code(p_value) if p_value is not None else "",
             scale=scale,
             interpretation=interpretation,
             expected_direction=expectation,
         )
+
+        undefined_statistics = [
+            name
+            for name, value in (("t_statistic", t_statistic), ("p_value", p_value))
+            if value is None
+        ]
+        if undefined_statistics:
+            flags.append(
+                DiagnosticFlag(
+                    code="UNDEFINED_INFERENCE_STATISTIC",
+                    category="statistical_evidence",
+                    severity="review",
+                    message=f"{term}: one or more classical inference statistics are undefined.",
+                    evidence={
+                        "term": term,
+                        "undefined_statistics": ", ".join(undefined_statistics),
+                    },
+                )
+            )
 
         if role != "intercept" and ci_spans_zero:
             flags.append(
@@ -193,6 +219,21 @@ def assess_coefficients(
         warning_codes=tuple(dict.fromkeys(flag.code for flag in structured_flags)),
     )
     return assessments, structured_flags, health
+
+
+def significance_code(p_value: float) -> str:
+    """Return the conventional R-style significance code for a valid p-value."""
+    if not 0 <= p_value <= 1:
+        raise ValueError("p_value must be between 0 and 1.")
+    if p_value <= 0.001:
+        return "***"
+    if p_value <= 0.01:
+        return "**"
+    if p_value <= 0.05:
+        return "*"
+    if p_value <= 0.1:
+        return "."
+    return ""
 
 
 def _interpret_term(

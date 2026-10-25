@@ -3,8 +3,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import statsmodels.api as sm
 
 from media_mix_ai_lab.core.config import ModelConfig
+from media_mix_ai_lab.diagnostics.coefficients import significance_code
 from media_mix_ai_lab.modeling.interfaces import ModelResult
 from media_mix_ai_lab.modeling.ols import OLSModelEngine
 
@@ -39,9 +41,27 @@ def test_linear_ols_recovers_coefficients_and_reproducible_provenance():
     assert result.adjusted_r_squared == pytest.approx(1)
     assert result.residual_variance == pytest.approx(0, abs=1e-25)
     assert result.standard_errors.keys() == result.coefficients.keys()
+    assert result.t_statistics.keys() == result.coefficients.keys()
+    assert result.p_values.keys() == result.coefficients.keys()
+    assert result.significance_codes.keys() == result.coefficients.keys()
     assert result.confidence_intervals.keys() == result.coefficients.keys()
+    expected = sm.OLS(
+        frame["revenue"], sm.add_constant(frame[["tv_spend", "search_spend", "promotion"]])
+    ).fit()
+    assert result.t_statistics == pytest.approx(expected.tvalues.to_dict())
+    assert result.p_values == pytest.approx(expected.pvalues.to_dict())
+    assert all(code == "***" for code in result.significance_codes.values())
+    assert all(
+        assessment.p_value == pytest.approx(result.p_values[term])
+        and assessment.t_statistic == pytest.approx(result.t_statistics[term])
+        for term, assessment in result.term_assessments.items()
+    )
     assert result.dataset_sha256 == repeated.dataset_sha256
     assert result.coefficients == pytest.approx(repeated.coefficients)
+    restored = ModelResult.model_validate_json(result.model_dump_json())
+    assert restored.t_statistics == result.t_statistics
+    assert restored.p_values == result.p_values
+    assert restored.significance_codes == result.significance_codes
     assert result.package_versions["statsmodels"]
     changed = frame.copy()
     changed.loc[0, "revenue"] += 1
@@ -78,6 +98,8 @@ def test_log_log_recovers_media_elasticities_and_keeps_controls_in_levels():
     }
     assert "conditional elasticities, not causal ROI" in " ".join(result.warnings)
     assert result.term_roles["log(tv_spend)"] == "media"
+    assert set(result.p_values) == {"const", "log(tv_spend)", "log(search_spend)", "promotion"}
+    assert all(p_value is not None for p_value in result.p_values.values())
     assert "16.18% change" in result.term_assessments["promotion"].interpretation
     assert result.term_assessments["promotion"].scale.startswith("model-implied %")
     negative_flag = next(
@@ -128,6 +150,30 @@ def test_weak_media_effect_flags_ci_crossing_zero_with_evidence():
     assert flag.evidence["term"] == "tv_spend"
     assert flag.evidence["ci_lower"] < 0 < flag.evidence["ci_upper"]
     assert "LARGE_RELATIVE_UNCERTAINTY" in result.health_summary.warning_codes
+    assert result.p_values["tv_spend"] > 0.05
+    assert result.significance_codes["tv_spend"] in {".", ""}
+
+
+@pytest.mark.parametrize(
+    ("p_value", "expected"),
+    [
+        (0.0, "***"),
+        (0.001, "***"),
+        (0.01, "**"),
+        (0.05, "*"),
+        (0.1, "."),
+        (0.100001, ""),
+        (1.0, ""),
+    ],
+)
+def test_r_style_significance_code_boundaries(p_value, expected):
+    assert significance_code(p_value) == expected
+
+
+@pytest.mark.parametrize("p_value", [-0.001, 1.001])
+def test_significance_code_rejects_invalid_probability(p_value):
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        significance_code(p_value)
 
 
 def test_near_collinear_predictors_flag_poor_conditioning():
@@ -236,7 +282,11 @@ def test_ols_supports_a_configured_no_intercept():
 
     assert result.coefficients == pytest.approx({"tv_spend": 3}, abs=1e-8)
     assert "const" not in result.coefficients
+    assert result.t_statistics["tv_spend"] is None
+    assert result.p_values["tv_spend"] == 0
+    assert result.significance_codes["tv_spend"] == "***"
     assert any("omits an intercept" in warning for warning in result.warnings)
+    assert any(flag.code == "UNDEFINED_INFERENCE_STATISTIC" for flag in result.diagnostic_flags)
     flag = next(
         flag for flag in result.diagnostic_flags if flag.code == "NO_INTERCEPT_UNCENTERED_R2"
     )
@@ -264,3 +314,6 @@ def test_documented_negative_media_export_matches_result_schema():
 
     assert result.health_summary.warning_codes == ("MEDIA_UNEXPECTED_SIGN",)
     assert result.diagnostic_flags[0].evidence["term"] == "tv_spend"
+    assert result.t_statistics["tv_spend"] == pytest.approx(-1069570957405867.4)
+    assert result.p_values["tv_spend"] == pytest.approx(1.0963639480210133e-260)
+    assert result.significance_codes["tv_spend"] == "***"

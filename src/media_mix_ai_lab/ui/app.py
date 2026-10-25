@@ -530,9 +530,14 @@ def _show_model_result(result: ModelResult) -> None:
                     {
                         "Term": term,
                         "Standard error": assessment.standard_error,
+                        "t-statistic": (
+                            assessment.t_statistic if assessment.t_statistic is not None else "—"
+                        ),
                         "95% CI lower": assessment.confidence_interval[0],
                         "95% CI upper": assessment.confidence_interval[1],
                         "CI spans zero": "Yes" if assessment.ci_spans_zero else "No",
+                        "p-value": _format_p_value(assessment.p_value),
+                        "Signif.": assessment.significance_code,
                     }
                     for term, assessment in result.term_assessments.items()
                 ]
@@ -541,9 +546,12 @@ def _show_model_result(result: ModelResult) -> None:
             width="stretch",
         )
         st.caption(
-            "Classical 95% OLS intervals assume a correctly specified model with independent, "
-            "homoskedastic errors. They measure sampling uncertainty under those assumptions; "
-            "they do not establish causality."
+            "Significance codes: *** p ≤ 0.001 · ** p ≤ 0.01 · * p ≤ 0.05 · . p ≤ 0.10. "
+            "These are classical two-sided OLS t-test p-values. They assume a correctly "
+            "specified model with independent, homoskedastic errors (and normal errors for "
+            "exact finite-sample inference). Stars summarize evidence under those assumptions; "
+            "time-series dependence and multiple testing can make them misleading. Stars do "
+            "not measure effect size or establish causality."
         )
         _show_diagnostic_flags(result, "statistical_evidence")
 
@@ -631,6 +639,13 @@ def _show_diagnostic_flags(result: ModelResult, category: str) -> None:
             st.error(message)
         else:
             st.warning(message)
+
+
+def _format_p_value(p_value: float | None) -> str:
+    """Format p-values for display while JSON retains full numeric precision."""
+    if p_value is None:
+        return "—"
+    return "<0.001" if p_value < 0.001 else f"{p_value:.3f}"
 
 
 def assistant() -> None:
