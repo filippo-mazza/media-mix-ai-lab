@@ -76,10 +76,13 @@ def test_adstock_search_and_apply():
     ).click().run()
     assert not app.exception
     assert app.session_state["adstock_search"]["final_test"] is None
+    assert app.session_state["adstock_search"]["final_test_comparison"] is None
+    assert any("Baseline vs selected model" in heading.value for heading in app.subheader)
     next(
         button for button in app.button if button.label == "Evaluate selected model on final test"
     ).click().run()
     assert app.session_state["adstock_search"]["final_test"]["rmse"] >= 0
+    assert app.session_state["adstock_search"]["final_test_comparison"]["selected"]
     assert app.session_state["adstock_final_evaluated_sha256"]
     assert next(
         button for button in app.button if button.label == "Optimize adstock parameters"

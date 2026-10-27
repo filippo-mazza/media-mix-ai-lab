@@ -5,6 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from media_mix_ai_lab.core.config import AdstockSpec, ModelConfig
@@ -19,6 +20,166 @@ from media_mix_ai_lab.optimization.adstock_search import (
     search_specification,
 )
 from media_mix_ai_lab.ui.help_content import HELP_TEXT, help_heading
+
+
+def _coefficient_comparison(result: dict) -> pd.DataFrame:
+    """Build an aligned, descriptive baseline-versus-selected coefficient table."""
+    baseline = result.get("baseline")
+    selected = result["selected"]
+    if baseline is None:
+        return pd.DataFrame()
+    rows = []
+    terms = list(dict.fromkeys([*baseline["coefficients"], *selected["coefficients"]]))
+    for term in terms:
+        baseline_beta = baseline["coefficients"].get(term)
+        selected_beta = selected["coefficients"].get(term)
+        interval = selected["confidence_intervals"].get(term)
+        rows.append(
+            {
+                "Term": term,
+                "Baseline beta": baseline_beta,
+                "Selected beta": selected_beta,
+                "Difference": (
+                    selected_beta - baseline_beta
+                    if baseline_beta is not None and selected_beta is not None
+                    else None
+                ),
+                "Selected SE": selected["standard_errors"].get(term),
+                "Selected 95% CI lower": interval[0] if interval else None,
+                "Selected 95% CI upper": interval[1] if interval else None,
+                "Selected p-value": selected["p_values"].get(term),
+                "Significance": selected["significance_codes"].get(term, ""),
+                "Baseline sign": (
+                    "positive" if baseline_beta > 0 else "negative" if baseline_beta < 0 else "zero"
+                ),
+                "Selected sign": (
+                    "positive" if selected_beta > 0 else "negative" if selected_beta < 0 else "zero"
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _show_selected_comparison(
+    frame: pd.DataFrame,
+    mapping: dict,
+    result: dict,
+    fit: pd.DataFrame,
+    validation: pd.DataFrame,
+    test: pd.DataFrame,
+) -> None:
+    """Render leakage-safe prediction, metric, and coefficient comparisons."""
+    st.subheader("Baseline vs selected model")
+    st.caption(
+        "The selected candidate was chosen only by validation RMSE. Coefficient uncertainty "
+        "is descriptive post-selection evidence and was not used to rank candidates."
+    )
+    baseline = result.get("baseline")
+    selected = result["selected"]
+    if baseline is None:
+        st.warning(
+            "A comparable no-adstock baseline was unavailable under the strict model domain. "
+            "Selected-model diagnostics remain available."
+        )
+    metric_rows = []
+    for label, row in (("No-adstock baseline", baseline), ("Selected candidate", selected)):
+        if row is None:
+            continue
+        metric_rows.append(
+            {
+                "Model": label,
+                "Validation RMSE (outcome units)": row["validation_rmse"],
+                "Validation MAE (outcome units)": row["validation_mae"],
+                "N fit": row["n_fit"],
+                "N validation": row["n_validation"],
+            }
+        )
+    final_comparison = result.get("final_test_comparison")
+    if final_comparison:
+        for row in metric_rows:
+            key = "baseline" if row["Model"] == "No-adstock baseline" else "selected"
+            evaluation = final_comparison.get(key)
+            if evaluation:
+                row["Final-test RMSE (outcome units)"] = evaluation["metrics"]["rmse"]
+                row["Final-test MAE (outcome units)"] = evaluation["metrics"]["mae"]
+                row["N final test"] = len(evaluation["predictions"])
+    st.dataframe(pd.DataFrame(metric_rows), hide_index=True, width="stretch")
+
+    warmup = result["feasibility"]["n_warmup"]
+    dates = pd.concat([fit.iloc[warmup:][mapping["date"]], validation[mapping["date"]]])
+    observed = pd.concat([fit.iloc[warmup:][mapping["target"]], validation[mapping["target"]]])
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(x=dates, y=observed, name="Observed", mode="lines"))
+    for label, row in (("Baseline prediction", baseline), ("Selected prediction", selected)):
+        if row is not None:
+            figure.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=[*row["fit_predictions"], *row["validation_predictions"]],
+                    name=label,
+                    mode="lines",
+                )
+            )
+    validation_start = validation[mapping["date"]].iloc[0]
+    figure.add_vrect(
+        x0=validation_start,
+        x1=validation[mapping["date"]].iloc[-1],
+        fillcolor="gold",
+        opacity=0.08,
+        line_width=0,
+        annotation_text="Validation",
+    )
+    if final_comparison:
+        test_dates = test[mapping["date"]]
+        figure.add_trace(
+            go.Scatter(x=test_dates, y=test[mapping["target"]], name="Observed · final test")
+        )
+        for label, key in (
+            ("Baseline · final test", "baseline"),
+            ("Selected · final test", "selected"),
+        ):
+            evaluation = final_comparison.get(key)
+            if evaluation:
+                figure.add_trace(go.Scatter(x=test_dates, y=evaluation["predictions"], name=label))
+        figure.add_vrect(
+            x0=test_dates.iloc[0],
+            x1=test_dates.iloc[-1],
+            fillcolor="royalblue",
+            opacity=0.07,
+            line_width=0,
+            annotation_text="Final test · revealed once",
+        )
+    else:
+        figure.add_vrect(
+            x0=test[mapping["date"]].iloc[0],
+            x1=test[mapping["date"]].iloc[-1],
+            fillcolor="gray",
+            opacity=0.08,
+            line_width=0,
+            annotation_text="Final test · hidden",
+        )
+    figure.update_layout(
+        title="Observed outcome and frozen-model predictions",
+        xaxis_title="Week",
+        yaxis_title=f"{mapping['target']} · original outcome units",
+    )
+    st.plotly_chart(figure, width="stretch")
+
+    comparison = _coefficient_comparison(result)
+    if not comparison.empty:
+        st.markdown("**Per-coefficient comparison**")
+        st.dataframe(comparison, hide_index=True, width="stretch")
+    warnings = list(
+        dict.fromkeys([*selected.get("warnings", []), *(baseline or {}).get("warnings", [])])
+    )
+    if warnings:
+        st.warning("Model diagnostics to review: " + ", ".join(warnings))
+    st.caption(
+        "Rank deficiency prevents fitting. High condition number, collinearity, small residual "
+        "degrees of freedom, and other structured warnings appear above when detected. OLS "
+        "betas are slopes in outcome units; log-log media betas are conditional elasticities. "
+        "Neither interpretation establishes causal attribution."
+    )
 
 
 def _adstock_introduction() -> None:
@@ -510,6 +671,7 @@ def adstock_page() -> None:
                 width="stretch",
             )
             st.caption(HELP_TEXT["error_metrics"])
+            _show_selected_comparison(frame, mapping, result, fit, validation, test)
             if result["final_test"] is None:
                 st.info(
                     "Selection is frozen from validation results. The final test remains unused."
