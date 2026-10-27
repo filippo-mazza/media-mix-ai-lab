@@ -98,6 +98,21 @@ def test_adstock_search_and_apply():
     assert result.config.adstock["tv_spend"].method == "geometric"
 
 
+def test_infeasible_adstock_search_is_disabled_but_exploration_remains_available():
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    app.session_state["dataset"] = app.session_state["dataset"].iloc[:14].copy()
+    navigate(app, "Adstock Analysis")
+
+    optimize = next(
+        button for button in app.button if button.label == "Optimize adstock parameters"
+    )
+    assert optimize.disabled
+    assert any("Not feasible" in item.value for item in app.error)
+    assert app.metric[0].label == "N total"
+    assert len(app.get("plotly_chart")) == 2
+    assert not app.session_state.get("adstock_search")
+
+
 def test_adstock_page_renders_visible_scientific_guidance():
     app = AppTest.from_file(str(APP), default_timeout=20).run()
     navigate(app, "Adstock Analysis")

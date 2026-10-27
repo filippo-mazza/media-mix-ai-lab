@@ -204,12 +204,14 @@ def same_holdout_period(first: TemporalValidationResult, second: TemporalValidat
     )
 
 
-def _design_matrix(data: pd.DataFrame, config: ModelConfig) -> pd.DataFrame:
+def _design_matrix(
+    data: pd.DataFrame, config: ModelConfig, *, require_positive_target: bool = True
+) -> pd.DataFrame:
     """Build predictors using only explicit, deterministic transformations."""
     transformed = transform_media_frame(data, config)
     features = [*config.channels, *config.controls]
     if config.kind == "log_log":
-        if (transformed[config.target] <= 0).any():
+        if require_positive_target and (transformed[config.target] <= 0).any():
             raise ValueError("Log-log holdout outcomes must be strictly positive.")
         for channel in config.channels:
             if (transformed[channel] <= 0).any():
