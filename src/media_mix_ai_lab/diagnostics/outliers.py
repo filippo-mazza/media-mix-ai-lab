@@ -56,7 +56,7 @@ class RemovedRow(BaseModel):
 
     row_position: int = Field(ge=0)
     date: str | None
-    studentized_residual: FiniteFloat
+    studentized_residual: FiniteFloat | Literal["Infinity", "-Infinity"]
     cooks_distance: FiniteFloat
     cooks_threshold: FiniteFloat
     reason: str
@@ -137,7 +137,7 @@ def flag_influential_row(
     threshold = 4.0 / len(data)
     with np.errstate(invalid="ignore"):
         flagged = (
-            np.isfinite(student)
+            ~np.isnan(student)
             & np.isfinite(cooks)
             & (np.abs(student) > rule.studentized_residual_threshold)
             & (cooks > threshold)
@@ -151,14 +151,26 @@ def flag_influential_row(
     if config.date_column in data.columns and not pd.isna(data[config.date_column].iloc[best]):
         value = data[config.date_column].iloc[best]
         date = value.isoformat() if hasattr(value, "isoformat") else str(value)
+    selected_student = student[best]
+    audit_student: float | Literal["Infinity", "-Infinity"]
+    if np.isposinf(selected_student):
+        audit_student = "Infinity"
+    elif np.isneginf(selected_student):
+        audit_student = "-Infinity"
+    else:
+        audit_student = float(selected_student)
+    if isinstance(audit_student, str):
+        student_text = audit_student
+    else:
+        student_text = f"{abs(audit_student):.3f}"
     return RemovedRow(
         row_position=best,
         date=date,
-        studentized_residual=float(student[best]),
+        studentized_residual=audit_student,
         cooks_distance=float(cooks[best]),
         cooks_threshold=threshold,
         reason=(
-            f"|externally studentized residual| {abs(student[best]):.3f} > "
+            f"|externally studentized residual| {student_text} > "
             f"{rule.studentized_residual_threshold:g} and Cook's distance "
             f"{cooks[best]:.4g} > 4/n = {threshold:.4g}"
         ),

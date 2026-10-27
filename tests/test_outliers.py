@@ -4,6 +4,8 @@ import pytest
 
 from media_mix_ai_lab.core.config import AdstockSpec, ModelConfig
 from media_mix_ai_lab.diagnostics.outliers import (
+    OutlierRule,
+    flag_influential_row,
     max_permitted_removals,
     run_outlier_sensitivity,
 )
@@ -106,3 +108,23 @@ def test_log_log_nonpositive_baseline_is_not_silently_dropped():
     frame.loc[3, "tv_spend"] = 0.0
     with pytest.raises(ValueError, match="No rows were dropped"):
         OLSModelEngine().fit(frame, config(kind="log_log"))
+
+
+def test_infinite_studentized_residual_is_flagged_and_audited_explicitly():
+    frame = pd.DataFrame(
+        {
+            "date": pd.date_range("2024-01-01", periods=20, freq="7D"),
+            "revenue": [100.0] + [0.0] * 19,
+            "tv_spend": [1.0] * 20,
+        }
+    )
+    no_intercept = ModelConfig(
+        target="revenue", channels=("tv_spend",), controls=(), intercept=False
+    )
+
+    flagged = flag_influential_row(frame, no_intercept, OutlierRule())
+
+    assert flagged is not None
+    assert flagged.row_position == 0
+    assert flagged.studentized_residual in {"Infinity", "-Infinity"}
+    assert "Infinity" in flagged.reason

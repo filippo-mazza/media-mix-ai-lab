@@ -782,12 +782,23 @@ def _outlier_sensitivity_section(frame: pd.DataFrame, saved_results: list[str]) 
             analysis = run_outlier_sensitivity(frame, baseline)
         except ValueError as error:
             st.session_state.pop("outlier_sensitivity", None)
+            st.session_state.pop("outlier_sensitivity_baseline_index", None)
             st.error(f"Outlier sensitivity analysis failed: {error}")
         else:
             st.session_state["outlier_sensitivity"] = analysis.model_dump_json(indent=2)
+            st.session_state["outlier_sensitivity_baseline_index"] = labels.index(chosen)
     stored = st.session_state.get("outlier_sensitivity")
     if stored:
-        _show_outlier_sensitivity(OutlierSensitivityResult.model_validate_json(stored), stored)
+        analysis = OutlierSensitivityResult.model_validate_json(stored)
+        current_dataset = OLSModelEngine._fingerprint(frame)
+        stored_baseline_index = st.session_state.get("outlier_sensitivity_baseline_index")
+        if analysis.dataset_sha256 != current_dataset or stored_baseline_index != labels.index(
+            chosen
+        ):
+            st.session_state.pop("outlier_sensitivity", None)
+            st.session_state.pop("outlier_sensitivity_baseline_index", None)
+        else:
+            _show_outlier_sensitivity(analysis, stored)
 
 
 def _show_outlier_sensitivity(analysis: OutlierSensitivityResult, result_json: str) -> None:
