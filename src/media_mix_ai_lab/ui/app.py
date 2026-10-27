@@ -18,6 +18,10 @@ from media_mix_ai_lab.data.workspace import (
     read_csv_upload,
     validate_weekly_dataset,
 )
+from media_mix_ai_lab.diagnostics.outliers import (
+    OutlierSensitivityResult,
+    run_outlier_sensitivity,
+)
 from media_mix_ai_lab.modeling.adstock import adstock_impulse_response, apply_adstock
 from media_mix_ai_lab.modeling.interfaces import ModelResult
 from media_mix_ai_lab.modeling.ols import (
@@ -749,10 +753,111 @@ def models() -> None:
                     mime="application/json",
                     key=f"download_model_result_{position}",
                 )
+    _outlier_sensitivity_section(frame, saved_results)
     st.caption(
         "Log-log models take natural logs of the outcome and media predictors; selected "
         "controls remain in their original units. No observations are removed. "
         "Adstock is a deterministic signal transform, not a causal attribution method."
+    )
+
+
+def _outlier_sensitivity_section(frame: pd.DataFrame, saved_results: list[str]) -> None:
+    st.subheader("Outlier sensitivity analysis")
+    if not saved_results:
+        st.info("Fit a baseline model before running an outlier sensitivity analysis.")
+        return
+    st.warning(
+        "Exploratory sensitivity analysis, not automatic cleaning: the loaded data and the "
+        "baseline result are left unchanged. Rows are flagged only by a prespecified rule "
+        "(|externally studentized residual| > 3 and Cook's distance > 4/n; ties broken by "
+        "largest Cook's distance, then smallest row position), one row per iteration, capped "
+        "at floor(5% of original rows). Significance after data-dependent exclusion is "
+        "exploratory; conventional p-values are not selection-adjusted."
+    )
+    labels = [f"Fit {index}" for index in range(1, len(saved_results) + 1)]
+    chosen = st.selectbox("Baseline fit", labels, index=len(labels) - 1, key="outlier_baseline")
+    baseline = ModelResult.model_validate_json(saved_results[labels.index(chosen)])
+    if st.button("Run outlier sensitivity analysis"):
+        try:
+            analysis = run_outlier_sensitivity(frame, baseline)
+        except ValueError as error:
+            st.session_state.pop("outlier_sensitivity", None)
+            st.session_state.pop("outlier_sensitivity_baseline_index", None)
+            st.error(f"Outlier sensitivity analysis failed: {error}")
+        else:
+            st.session_state["outlier_sensitivity"] = analysis.model_dump_json(indent=2)
+            st.session_state["outlier_sensitivity_baseline_index"] = labels.index(chosen)
+    stored = st.session_state.get("outlier_sensitivity")
+    if stored:
+        analysis = OutlierSensitivityResult.model_validate_json(stored)
+        current_dataset = OLSModelEngine._fingerprint(frame)
+        stored_baseline_index = st.session_state.get("outlier_sensitivity_baseline_index")
+        if analysis.dataset_sha256 != current_dataset or stored_baseline_index != labels.index(
+            chosen
+        ):
+            st.session_state.pop("outlier_sensitivity", None)
+            st.session_state.pop("outlier_sensitivity_baseline_index", None)
+        else:
+            _show_outlier_sensitivity(analysis, stored)
+
+
+def _show_outlier_sensitivity(analysis: OutlierSensitivityResult, result_json: str) -> None:
+    st.info(
+        f"Stop reason: {analysis.stop_message} Removed {len(analysis.removed_rows)} of a "
+        f"maximum {analysis.max_removals} rows (original N = {analysis.n_original})."
+    )
+    st.caption(
+        "Differences from the baseline are descriptive; they do not indicate improvement "
+        "or correctness."
+    )
+    if analysis.removed_rows:
+        st.markdown("**Removed rows (audit trail)**")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Iteration": index,
+                        "Row (0-based)": row.row_position,
+                        "Date": row.date,
+                        "Studentized residual": row.studentized_residual,
+                        "Cook's distance": row.cooks_distance,
+                        "Reason": row.reason,
+                    }
+                    for index, row in enumerate(analysis.removed_rows, start=1)
+                ]
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+    rows = []
+    for step in analysis.steps:
+        label = "Baseline" if step.iteration == 0 else f"Iteration {step.iteration}"
+        if step.iteration == len(analysis.steps) - 1 and step.iteration > 0:
+            label += " (final)"
+        for name, term in step.terms.items():
+            rows.append(
+                {
+                    "Fit": label,
+                    "N": step.n_observations,
+                    "Term": name,
+                    "Coefficient": term.coefficient,
+                    "Sign": term.sign,
+                    "Change from baseline": term.coefficient_change,
+                    "Sign changed": term.sign_changed,
+                    "p-value (exploratory)": term.p_value,
+                    "CI lower": term.ci_lower,
+                    "CI upper": term.ci_upper,
+                    "R²": step.r_squared,
+                    "R² change": step.r_squared_change,
+                }
+            )
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    st.download_button(
+        "Save sensitivity analysis as JSON",
+        result_json,
+        file_name=f"outlier-sensitivity-{analysis.dataset_sha256[:12]}.json",
+        mime="application/json",
+        key="download_outlier_sensitivity",
     )
 
 
