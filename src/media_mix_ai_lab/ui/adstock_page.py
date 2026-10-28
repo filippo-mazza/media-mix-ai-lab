@@ -26,7 +26,7 @@ def _coefficient_comparison(result: dict) -> pd.DataFrame:
     """Build an aligned, descriptive baseline-versus-selected coefficient table."""
     baseline = result.get("baseline")
     selected = result["selected"]
-    if baseline is None:
+    if baseline is None or baseline.get("status") != "ok":
         return pd.DataFrame()
     rows = []
     terms = list(dict.fromkeys([*baseline["coefficients"], *selected["coefficients"]]))
@@ -76,7 +76,8 @@ def _show_selected_comparison(
     )
     baseline = result.get("baseline")
     selected = result["selected"]
-    if baseline is None:
+    if baseline is None or baseline.get("status") != "ok":
+        baseline = None
         st.warning(
             "A comparable no-adstock baseline was unavailable under the strict model domain. "
             "Selected-model diagnostics remain available."

@@ -11,6 +11,7 @@ from media_mix_ai_lab.optimization.adstock_search import (
     partition,
     search,
 )
+from media_mix_ai_lab.ui.adstock_page import _coefficient_comparison
 
 
 def fixture(n=50):
@@ -173,6 +174,24 @@ def test_final_test_outcome_is_not_consulted_until_explicit_evaluation():
     assert len(evaluated["final_test_comparison"]["selected"]["predictions"]) == len(
         partition(changed_test, "date")[2]
     )
+
+
+def test_failed_baseline_remains_unavailable_when_selected_candidate_succeeds():
+    frame = fixture()
+    frame["control"] = frame["spend"]
+    config = ModelConfig(target="revenue", channels=("spend",), controls=("control",))
+
+    result = search(frame, config, budget=4)
+
+    assert result["baseline"]["status"] == "failed"
+    assert result["selected"]["status"] == "ok"
+    assert result["selected"]["config"]["adstock"]
+    assert _coefficient_comparison(result).empty
+
+    evaluated = evaluate_final_test(frame, result)
+
+    assert evaluated["final_test_comparison"]["baseline"] is None
+    assert evaluated["final_test_comparison"]["selected"] is not None
 
 
 def test_search_accepts_an_explicit_feasibility_policy():

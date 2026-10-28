@@ -510,7 +510,10 @@ def evaluate_final_test(data: pd.DataFrame, result: dict) -> dict:
         return {"metrics": metrics.model_dump(), "predictions": prediction.tolist()}
 
     selected_evaluation = evaluate(result["selected"])
-    baseline_evaluation = evaluate(result.get("baseline"))
+    baseline = result.get("baseline")
+    baseline_evaluation = (
+        evaluate(baseline) if baseline and baseline.get("status") == "ok" else None
+    )
     assert selected_evaluation is not None
     evaluated = deepcopy(result)
     evaluated["final_test"] = selected_evaluation["metrics"]
