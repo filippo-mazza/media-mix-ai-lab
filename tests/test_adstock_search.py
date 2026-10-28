@@ -11,6 +11,7 @@ from media_mix_ai_lab.optimization.adstock_search import (
     partition,
     search,
 )
+from media_mix_ai_lab.ui.adstock_page import _coefficient_comparison
 
 
 def fixture(n=50):
@@ -158,8 +159,39 @@ def test_final_test_outcome_is_not_consulted_until_explicit_evaluation():
     changed = search(changed_test, config, max_lag=8, budget=4)
 
     assert original["selected"] == changed["selected"]
+    assert original["final_test_comparison"] is None
+    assert len(original["selected"]["fit_predictions"]) == original["feasibility"]["n_fit"]
+    assert (
+        len(original["selected"]["validation_predictions"])
+        == original["partitions"]["validation"]["n_usable"]
+    )
+    assert original["selected"]["standard_errors"]
+    assert original["selected"]["confidence_intervals"]
     evaluated = evaluate_final_test(changed_test, changed)
     assert np.isfinite(evaluated["final_test"]["rmse"])
+    assert evaluated["final_test_comparison"]["selected"]["metrics"] == evaluated["final_test"]
+    assert evaluated["final_test_comparison"]["baseline"] is not None
+    assert len(evaluated["final_test_comparison"]["selected"]["predictions"]) == len(
+        partition(changed_test, "date")[2]
+    )
+
+
+def test_failed_baseline_remains_unavailable_when_selected_candidate_succeeds():
+    frame = fixture()
+    frame["control"] = frame["spend"]
+    config = ModelConfig(target="revenue", channels=("spend",), controls=("control",))
+
+    result = search(frame, config, budget=4)
+
+    assert result["baseline"]["status"] == "failed"
+    assert result["selected"]["status"] == "ok"
+    assert result["selected"]["config"]["adstock"]
+    assert _coefficient_comparison(result).empty
+
+    evaluated = evaluate_final_test(frame, result)
+
+    assert evaluated["final_test_comparison"]["baseline"] is None
+    assert evaluated["final_test_comparison"]["selected"] is not None
 
 
 def test_search_accepts_an_explicit_feasibility_policy():

@@ -388,6 +388,8 @@ def search(
         try:
             fit_config = _config_after_warmup(fit, config, n_warmup)
             fitted = OLSModelEngine().fit(fit_data, fit_config)
+            fit_design = _design_matrix(fit_data, fit_config, require_positive_target=False)
+            fit_predicted = _predict(fit_design, pd.Series(fitted.coefficients), config)
             design = _design_matrix(
                 development_after_warmup, fit_config, require_positive_target=False
             ).iloc[len(fit_data) :]
@@ -396,8 +398,18 @@ def search(
             row.update(
                 validation_rmse=metrics.rmse,
                 validation_mae=metrics.mae,
+                fit_predictions=fit_predicted.tolist(),
+                validation_predictions=predicted.tolist(),
                 coefficients=fitted.coefficients,
+                standard_errors=fitted.standard_errors,
+                confidence_intervals=fitted.confidence_intervals,
                 p_values=fitted.p_values,
+                significance_codes=fitted.significance_codes,
+                diagnostic_flags=[flag.model_dump(mode="json") for flag in fitted.diagnostic_flags],
+                condition_number=fitted.condition_number,
+                design_rank=fitted.design_rank,
+                parameter_count=fitted.parameter_count,
+                residual_degrees_freedom=fitted.residual_degrees_freedom,
                 warnings=list(fitted.health_summary.warning_codes),
                 package_versions=fitted.package_versions,
             )
@@ -452,6 +464,7 @@ def search(
         "selected": selected,
         "final_test": None,
         "final_test_predictions": None,
+        "final_test_comparison": None,
         "package_versions": selected["package_versions"],
         "caveat": "Selection is predictive, not causal; post-selection p-values are optimistic. "
         "Log-target predictions use exp(log prediction) without smearing correction.",
@@ -469,7 +482,6 @@ def evaluate_final_test(data: pd.DataFrame, result: dict) -> dict:
     fit, validation, test = partition(
         data, base.date_column, specification["final_holdout_fraction"]
     )
-    selected_config = ModelConfig.model_validate(result["selected"]["config"])
     policy = FeasibilityPolicy(**specification["feasibility_policy"])
     feasibility = assess_feasibility(
         data,
@@ -483,16 +495,31 @@ def evaluate_final_test(data: pd.DataFrame, result: dict) -> dict:
     if not feasibility.feasible:
         raise ValueError("Final test is not feasible: " + " ".join(feasibility.failures))
     fit_data = fit.iloc[feasibility.n_warmup :]
-    final_fit_config = _config_after_warmup(fit, selected_config, feasibility.n_warmup)
-    final_fit = OLSModelEngine().fit(fit_data, final_fit_config)
-    final_design = _design_matrix(
-        data.iloc[feasibility.n_warmup :],
-        final_fit_config,
-        require_positive_target=False,
-    ).iloc[len(fit_data) + len(validation) :]
-    final_prediction = _predict(final_design, pd.Series(final_fit.coefficients), selected_config)
-    final_metrics = _error_metrics(test[base.target].to_numpy(dtype=float), final_prediction)
+
+    def evaluate(candidate: dict | None) -> dict | None:
+        if candidate is None:
+            return None
+        candidate_config = ModelConfig.model_validate(candidate["config"])
+        fit_config = _config_after_warmup(fit, candidate_config, feasibility.n_warmup)
+        fitted = OLSModelEngine().fit(fit_data, fit_config)
+        design = _design_matrix(
+            data.iloc[feasibility.n_warmup :], fit_config, require_positive_target=False
+        ).iloc[len(fit_data) + len(validation) :]
+        prediction = _predict(design, pd.Series(fitted.coefficients), candidate_config)
+        metrics = _error_metrics(test[base.target].to_numpy(dtype=float), prediction)
+        return {"metrics": metrics.model_dump(), "predictions": prediction.tolist()}
+
+    selected_evaluation = evaluate(result["selected"])
+    baseline = result.get("baseline")
+    baseline_evaluation = (
+        evaluate(baseline) if baseline and baseline.get("status") == "ok" else None
+    )
+    assert selected_evaluation is not None
     evaluated = deepcopy(result)
-    evaluated["final_test"] = final_metrics.model_dump()
-    evaluated["final_test_predictions"] = final_prediction.tolist()
+    evaluated["final_test"] = selected_evaluation["metrics"]
+    evaluated["final_test_predictions"] = selected_evaluation["predictions"]
+    evaluated["final_test_comparison"] = {
+        "baseline": baseline_evaluation,
+        "selected": selected_evaluation,
+    }
     return evaluated
