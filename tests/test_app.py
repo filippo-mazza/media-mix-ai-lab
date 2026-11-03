@@ -43,7 +43,7 @@ def test_workbench_sections_render_without_credentials(section):
     navigate(app, section)
     assert not app.exception
     assert not app.sidebar.radio
-    assert len(app.sidebar.button) == len(NAVIGATION_INDEX)
+    assert len(app.sidebar.button) == len(NAVIGATION_INDEX) + 1
     assert app.session_state["active_section"] == section
     assert len(app.session_state["dataset"]) == 104
     assert app.main.title[0].value == (
@@ -479,3 +479,123 @@ def test_outlier_sensitivity_is_hidden_when_selected_baseline_changes():
 
     assert "outlier_sensitivity" not in app.session_state
     assert "outlier_sensitivity_baseline_index" not in app.session_state
+
+
+def test_model_configuration_survives_all_page_transitions():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Models")
+    app.selectbox(key="model_input_kind").set_value("log_log").run()
+    app.multiselect(key="model_input_channels").set_value(["tv_spend"]).run()
+    app.multiselect(key="model_input_controls").set_value(["seasonality"]).run()
+    app.selectbox(key="adstock_method_tv_spend").set_value("geometric").run()
+    app.number_input(key="adstock_alpha_tv_spend").set_value(0.3).run()
+    app.checkbox(key="model_input_intercept").uncheck().run()
+    for section in NAVIGATION_INDEX:
+        if section != "Models":
+            navigate(app, section)
+            assert not app.exception
+            assert any("Synthetic sample" in item.value for item in app.sidebar.markdown)
+    navigate(app, "Models")
+    assert app.selectbox(key="model_input_kind").value == "log_log"
+    assert app.multiselect(key="model_input_channels").value == ["tv_spend"]
+    assert app.multiselect(key="model_input_controls").value == ["seasonality"]
+    assert app.number_input(key="adstock_alpha_tv_spend").value == 0.3
+    assert app.selectbox(key="adstock_method_tv_spend").value == "geometric"
+    assert not app.checkbox(key="model_input_intercept").value
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    result = ModelResult.model_validate_json(app.session_state["model_results"][-1])
+    assert result.config.kind == "log_log"
+    assert result.config.channels == ("tv_spend",)
+    assert result.config.controls == ("seasonality",)
+    assert result.config.adstock["tv_spend"].alpha == 0.3
+    assert not result.config.intercept
+
+
+def test_reset_confirmation_cancel_and_analysis_cleanup():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    original = app.session_state["dataset"].copy(deep=True)
+    navigate(app, "Models")
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    navigate(app, "Diagnostics")
+    next(button for button in app.button if button.label == "Evaluate holdout").click().run()
+    app.session_state["adstock_search"] = {"stale": True}
+    app.session_state["adstock_applied_config"] = {"stale": True}
+    app.session_state["adstock_exploration"] = {"stale": True}
+    app.session_state["adstock_final_evaluated_sha256"] = "old-data"
+    app.session_state["outlier_sensitivity"] = "stale"
+    app.session_state["outlier_sensitivity_baseline_index"] = 0
+    app.session_state["unrelated_preference"] = "keep me"
+    app.sidebar.button(key="reset_workspace").click().run()
+    assert app.session_state["dataset"].equals(original)
+    assert app.session_state["model_results"]
+    assert app.session_state["temporal_results"]
+    app.sidebar.button(key="cancel_workspace_reset").click().run()
+    assert not app.session_state["reset_workspace_pending"]
+    assert app.session_state["model_results"]
+    app.sidebar.button(key="reset_workspace").click().run()
+    app.sidebar.button(key="confirm_workspace_reset").click().run()
+    assert not app.exception
+    assert app.session_state["active_section"] == "Home"
+    assert app.session_state["dataset"].equals(original)
+    assert app.session_state["dataset_mapping"]["target"] == "revenue"
+    assert app.session_state["unrelated_preference"] == "keep me"
+    for key in (
+        "model_results",
+        "temporal_results",
+        "outlier_sensitivity",
+        "outlier_sensitivity_baseline_index",
+        "weekly_csv_upload",
+        "adstock_search",
+        "adstock_applied_config",
+        "adstock_exploration",
+        "adstock_final_evaluated_sha256",
+        "model_input_kind",
+    ):
+        assert key not in app.session_state
+    navigate(app, "Diagnostics")
+    assert any("Fit a model on the Models page" in item.value for item in app.info)
+    navigate(app, "Models")
+    assert app.selectbox(key="model_input_kind").value == "ols"
+
+
+def test_upload_persists_and_reset_clears_uploader_and_stale_fits():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Models")
+    next(button for button in app.button if button.label == "Fit model").click().run()
+    navigate(app, "Data")
+    content = b"week,sales,media\n2024-01-01,10,1\n2024-01-08,12,2\n2024-01-15,13,3\n"
+    app.get("file_uploader")[0].set_value(("custom.csv", content, "text/csv")).run()
+    next(
+        button for button in app.button if button.label == "Validate and use dataset"
+    ).click().run()
+    assert not app.exception
+    assert "model_results" not in app.session_state
+    uploaded = app.session_state["dataset"].copy(deep=True)
+    mapping = app.session_state["dataset_mapping"].copy()
+    for section in NAVIGATION_INDEX:
+        navigate(app, section)
+        assert not app.exception
+        assert app.session_state["dataset"].equals(uploaded)
+        assert app.session_state["dataset_mapping"] == mapping
+        assert any("Uploaded CSV" in item.value for item in app.sidebar.markdown)
+    app.sidebar.button(key="reset_workspace").click().run()
+    app.sidebar.button(key="confirm_workspace_reset").click().run()
+    navigate(app, "Data")
+    assert app.get("file_uploader")[0].value is None
+    assert app.session_state["dataset_source"]["kind"] == "synthetic"
+    assert len(app.session_state["dataset"]) == 104
+
+
+@pytest.mark.parametrize("missing_key", ["dataset", "dataset_mapping", "dataset_source"])
+def test_missing_workspace_state_keeps_navigation_and_reset_available(missing_key):
+    app = AppTest.from_file(str(APP), default_timeout=20).run()
+    del app.session_state[missing_key]
+    navigate(app, "Explore")
+    assert not app.exception
+    assert any("Workspace data or mapping is missing" in item.value for item in app.error)
+    assert not app.metric
+    app.sidebar.button(key="reset_workspace").click().run()
+    app.sidebar.button(key="confirm_workspace_reset").click().run()
+    assert not app.exception
+    assert not app.error
+    assert app.session_state["active_section"] == "Home"

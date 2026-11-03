@@ -61,6 +61,27 @@ Tests exercise data reproducibility, schema errors, preservation of inputs,
 configuration validation, OLS coefficient recovery, observation accounting and
 error cases, typed summary tools, and all seven Streamlit sections.
 
+## Workspace navigation and reset
+
+The sidebar labels the active data as a synthetic sample or an uploaded CSV on
+every page. Dataset mapping and editable model settings (including per-channel
+adstock, controls, intercept, and sign expectations) survive page navigation.
+Saved fits and evaluations remain available within the session.
+
+**Reset workspace** in the sidebar opens a confirmation with **Confirm reset**
+and **Cancel**. Confirming restores the original seed-42 synthetic sample and
+default mapping, opens Home, clears the CSV uploader, and discards saved fits,
+temporal evaluations, outlier sensitivity, adstock searches, applied settings,
+and model controls. Unrelated session preferences are preserved. Loading the
+sample or validating a replacement CSV also invalidates prior analysis and model
+controls so results from another dataset cannot be mistaken for current results.
+Resetting starts a new exploratory workspace; it does not make a previously
+inspected final-test period scientifically untouched again.
+
+Missing or invalid workspace data shows an actionable error without metrics;
+navigation, reset confirmation, and **Restore synthetic sample** remain available.
+The workspace is session-only and does not persist uploaded data externally.
+
 ## Architecture
 
 ```text

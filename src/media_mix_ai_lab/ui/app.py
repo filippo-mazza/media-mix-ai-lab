@@ -124,6 +124,50 @@ SIDEBAR_STYLE = """
 """
 
 
+# Explicitly owned state: unrelated session preferences survive workspace replacement.
+WORKSPACE_KEYS = {
+    "model_results",
+    "temporal_results",
+    "outlier_sensitivity",
+    "outlier_sensitivity_baseline_index",
+}
+MODEL_CONTROL_PREFIXES = (
+    "model_input_",
+    "adstock_method_",
+    "adstock_scaling_",
+    "adstock_alpha_",
+    "adstock_initial_state_",
+    "adstock_lag_",
+    "adstock_theta_",
+    "adstock_history_",
+    "media_sign_expectation_",
+)
+
+
+def _preserve_model_controls() -> None:
+    """Detach keyed controls from Streamlit's cleanup when their page is hidden."""
+    for key in list(st.session_state):
+        if key.startswith(MODEL_CONTROL_PREFIXES):
+            st.session_state[key] = st.session_state[key]
+
+
+def _clear_workspace_analysis() -> None:
+    for key in list(st.session_state):
+        if key in WORKSPACE_KEYS or key.startswith((*MODEL_CONTROL_PREFIXES, "adstock_")):
+            del st.session_state[key]
+
+
+def _reset_workspace() -> None:
+    _load_sample()
+    st.session_state.pop("weekly_csv_upload", None)
+    st.session_state.pop("reset_workspace_pending", None)
+    _navigate("Home")
+
+
+def _set_reset_pending(pending: bool) -> None:
+    st.session_state["reset_workspace_pending"] = pending
+
+
 def _navigate(section: str) -> None:
     """Persist the active page across Streamlit reruns."""
     st.session_state["active_section"] = section
@@ -183,8 +227,11 @@ def sidebar_navigation(source: dict[str, str | int], row_count: int) -> str:
                 )
             st.write("")
         st.divider()
-        kind = "Synthetic sample · seed 42" if source["kind"] == "synthetic" else "Uploaded CSV"
-        filename = html.escape(str(source["filename"]))
+        kind = {
+            "synthetic": "Synthetic sample · seed 42",
+            "upload": "Uploaded CSV",
+        }.get(source.get("kind"), "Dataset unavailable")
+        filename = html.escape(str(source.get("filename", "Unavailable")))
         st.caption("ACTIVE DATASET")
         st.markdown(
             '<div class="dataset-card">'
@@ -193,6 +240,22 @@ def sidebar_navigation(source: dict[str, str | int], row_count: int) -> str:
             "</div>",
             unsafe_allow_html=True,
         )
+        st.button(
+            "Reset workspace",
+            key="reset_workspace",
+            use_container_width=True,
+            on_click=_set_reset_pending,
+            args=(True,),
+        )
+        if st.session_state.get("reset_workspace_pending"):
+            st.warning(
+                "Discard the current dataset, mapping, saved fits, diagnostics and adstock "
+                "settings? This restores the synthetic sample and opens Home."
+            )
+            st.button("Confirm reset", key="confirm_workspace_reset", on_click=_reset_workspace)
+            st.button(
+                "Cancel", key="cancel_workspace_reset", on_click=_set_reset_pending, args=(False,)
+            )
         st.caption("Python computes · AI interprets")
     return section
 
@@ -213,7 +276,12 @@ def home() -> None:
             "4. Let AI explain computed evidence, with uncertainty (coming next)."
         )
     with right:
-        st.info("Start in **Explore**. A two-year synthetic weekly dataset is already loaded.")
+        if st.session_state["dataset_source"]["kind"] == "synthetic":
+            st.info("Start in **Explore**. A two-year synthetic weekly dataset is already loaded.")
+        else:
+            st.info(
+                "Your uploaded weekly dataset is active. Inspect it in **Data** or **Explore**."
+            )
     st.subheader("LLMs reason. Deterministic tools compute.")
     st.write(
         "Numerical outputs will come from validated Python tools. AI interpretations "
@@ -232,7 +300,7 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
     st.write("Upload a weekly CSV or inspect the included synthetic dataset.")
     st.button("Load sample dataset", on_click=_load_sample)
     uploaded_file = st.file_uploader(
-        "Upload a weekly CSV", type=["csv"], help=HELP_TEXT["weekly_data"]
+        "Upload a weekly CSV", type=["csv"], key="weekly_csv_upload", help=HELP_TEXT["weekly_data"]
     )
     if uploaded_file is not None:
         content = uploaded_file.getvalue()
@@ -314,7 +382,7 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
                     except (TypeError, ValueError) as error:
                         st.error(str(error))
                     else:
-                        _clear_adstock_session()
+                        _clear_workspace_analysis()
                         st.session_state["dataset"] = mapped
                         st.session_state["dataset_mapping"] = new_mapping
                         st.session_state["dataset_source"] = {
@@ -362,7 +430,7 @@ def data_page(frame: pd.DataFrame, mapping: ColumnMapping, source: dict[str, str
 
 
 def _load_sample() -> None:
-    _clear_adstock_session()
+    _clear_workspace_analysis()
     st.session_state["dataset"] = generate_sample_data()
     st.session_state["dataset_mapping"] = {
         "date": "date",
@@ -374,17 +442,6 @@ def _load_sample() -> None:
         "kind": "synthetic",
         "filename": "weekly_marketing.csv",
     }
-
-
-def _clear_adstock_session() -> None:
-    """Discard calibration state whenever the active dataset is replaced."""
-    for key in (
-        "adstock_search",
-        "adstock_applied_config",
-        "adstock_exploration",
-        "adstock_final_evaluated_sha256",
-    ):
-        st.session_state.pop(key, None)
 
 
 def explore(frame: pd.DataFrame, mapping: ColumnMapping, source_kind: str) -> None:
@@ -469,6 +526,7 @@ def models() -> None:
     kind = st.selectbox(
         "Model specification",
         ["ols", "log_log"],
+        key="model_input_kind",
         format_func=lambda value: "Linear OLS" if value == "ols" else "Log-log OLS",
         help=HELP_TEXT["model_specification"],
     )
@@ -476,7 +534,11 @@ def models() -> None:
         numeric_columns.index(mapping["target"]) if mapping["target"] in numeric_columns else 0
     )
     target = st.selectbox(
-        "Outcome", numeric_columns, index=target_default, help=HELP_TEXT["outcome"]
+        "Outcome",
+        numeric_columns,
+        index=target_default,
+        key="model_input_target",
+        help=HELP_TEXT["outcome"],
     )
     media_options = [
         column for column in mapping["channels"] if column in numeric_columns and column != target
@@ -485,6 +547,7 @@ def models() -> None:
     channels = st.multiselect(
         "Media predictors",
         media_options,
+        key="model_input_channels",
         default=media_default,
         help=HELP_TEXT["media_predictors"],
     )
@@ -494,6 +557,7 @@ def models() -> None:
     controls = st.multiselect(
         "Optional controls",
         [column for column in control_options if column not in channels],
+        key="model_input_controls",
         default=[column for column in control_options if column not in channels],
         help=HELP_TEXT["optional_controls"],
     )
@@ -586,7 +650,9 @@ def models() -> None:
                 adstock_settings[channel] = AdstockSpec(**settings)
     except (ValueError, OverflowError) as error:
         adstock_error = str(error)
-    intercept = st.checkbox("Include intercept", value=True, help=HELP_TEXT["intercept"])
+    intercept = st.checkbox(
+        "Include intercept", value=True, key="model_input_intercept", help=HELP_TEXT["intercept"]
+    )
     with st.expander("Domain sign expectations"):
         st.caption(
             "These are review hypotheses, not mathematical constraints. Choose Either sign "
@@ -641,7 +707,7 @@ def models() -> None:
             "adstock_method",
             key="model_adstock_signal_preview",
         )
-        preview_channel = st.selectbox("Channel preview", channels)
+        preview_channel = st.selectbox("Channel preview", channels, key="model_input_preview")
         spec = config.adstock.get(preview_channel, AdstockSpec())
         try:
             transformed_signal = apply_adstock(frame[preview_channel], spec)
@@ -1105,20 +1171,26 @@ def roi() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Media Mix AI Lab", page_icon="🔬", layout="wide")
-    if "dataset" not in st.session_state:
+    _preserve_model_controls()
+    if not any(key in st.session_state for key in ("dataset", "dataset_mapping", "dataset_source")):
         _load_sample()
-    frame = st.session_state["dataset"]
-    mapping = st.session_state["dataset_mapping"]
-    source = st.session_state["dataset_source"]
-    section = sidebar_navigation(source, len(frame))
+    frame = st.session_state.get("dataset")
+    mapping = st.session_state.get("dataset_mapping")
+    source = st.session_state.get("dataset_source")
+    section = sidebar_navigation(
+        source or {"kind": "unknown", "filename": "Unavailable"},
+        len(frame) if isinstance(frame, pd.DataFrame) else 0,
+    )
     try:
+        if not isinstance(frame, pd.DataFrame) or not mapping or not source:
+            raise ValueError("Workspace data or mapping is missing. Restore the synthetic sample.")
         if source["kind"] == "upload":
             validate_weekly_dataset(frame, mapping)
         else:
             validate_dataset(
                 frame, allow_negative_target_media=section in {"Models", "Adstock Analysis"}
             )
-    except ValueError as error:
+    except (ValueError, KeyError, TypeError) as error:
         st.error(f"Dataset validation failed: {error}")
         st.button("Restore synthetic sample", on_click=_load_sample)
         st.stop()
