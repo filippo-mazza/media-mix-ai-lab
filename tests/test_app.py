@@ -13,10 +13,11 @@ NAVIGATION_INDEX = {
     "Data": 1,
     "Explore": 2,
     "Models": 3,
-    "Adstock Analysis": 4,
-    "Diagnostics": 5,
-    "AI Assistant": 6,
-    "ROI Analysis": 7,
+    "Sample Influence": 4,
+    "Adstock Analysis": 5,
+    "Diagnostics": 6,
+    "AI Assistant": 7,
+    "ROI Analysis": 8,
 }
 
 
@@ -32,6 +33,7 @@ def navigate(app: AppTest, section: str) -> AppTest:
         "Data",
         "Explore",
         "Models",
+        "Sample Influence",
         "Adstock Analysis",
         "Diagnostics",
         "AI Assistant",
@@ -479,3 +481,80 @@ def test_outlier_sensitivity_is_hidden_when_selected_baseline_changes():
 
     assert "outlier_sensitivity" not in app.session_state
     assert "outlier_sensitivity_baseline_index" not in app.session_state
+
+
+def fit_model(app: AppTest) -> AppTest:
+    navigate(app, "Models")
+    return next(button for button in app.button if button.label == "Fit model").click().run()
+
+
+def test_sample_influence_is_discoverable_and_shows_empty_state():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    assert "Sample Influence" in [button.label for button in app.sidebar.button]
+    navigate(app, "Sample Influence")
+
+    assert not app.exception
+    assert app.main.title[0].value == "Sample Influence"
+    assert any("No fitted model is available" in item.value for item in app.info)
+    assert not app.get("plotly_chart")
+    assert not app.get("download_button")
+
+
+def test_sample_influence_renders_heatmap_drill_down_downloads_and_guidance():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    fit_model(app)
+    stored = list(app.session_state["model_results"])
+    navigate(app, "Sample Influence")
+
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 3
+    heatmap = app.get("plotly_chart")[0]
+    assert "heatmap" in heatmap.proto.spec
+    assert any(metric.label == "Fit N" and metric.value == "104" for metric in app.metric)
+    assert any(
+        metric.label == "Excluded / unavailable rows" and metric.value == "0"
+        for metric in app.metric
+    )
+    assert len(app.get("download_button")) == 2
+    assert any("Observation drill-down" in item.value for item in app.subheader)
+    assert any("Original vs leave-one-out" in item.value for item in app.markdown)
+    assert any("heuristics" in item.value for item in app.markdown)
+    assert any(element.label == "Selected observation" for element in app.selectbox)
+    # Read-only: stored models and dataset are not modified, no rows are dropped.
+    assert app.session_state["model_results"] == stored
+    assert len(app.session_state["dataset"]) == 104
+
+    next(button for button in app.button if button.label == "← Back to Models").click().run()
+    assert app.session_state["active_section"] == "Models"
+    assert app.main.title[0].value == "Models"
+
+
+def test_sample_influence_controls_change_view_without_changing_data():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    fit_model(app)
+    navigate(app, "Sample Influence")
+    terms = next(item for item in app.multiselect if item.label == "Coefficients shown")
+    terms.set_value(terms.value[:2]).run()
+    assert not app.exception
+    heatmap = app.get("plotly_chart")[0].proto.spec
+    assert '"x":["const"' in heatmap.replace(" ", "")
+    app.radio[0].set_value("Max |DFBETAS|, descending").run()
+    assert not app.exception
+    selected = next(item for item in app.selectbox if item.label == "Selected observation")
+    selected.set_value(5).run()
+    assert not app.exception
+    assert any("row 5" in item.value for item in app.subheader)
+    assert len(app.session_state["dataset"]) == 104
+
+
+def test_sample_influence_reports_dataset_mismatch_instead_of_refitting():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    fit_model(app)
+    changed = app.session_state["dataset"].copy()
+    changed.loc[0, "revenue"] += 1.0
+    app.session_state["dataset"] = changed
+    navigate(app, "Sample Influence")
+
+    assert not app.exception
+    assert any("fingerprint" in item.value for item in app.error)
+    assert not app.get("plotly_chart")

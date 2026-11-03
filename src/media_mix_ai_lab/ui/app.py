@@ -32,6 +32,7 @@ from media_mix_ai_lab.modeling.ols import (
 from media_mix_ai_lab.ui.adstock_page import adstock_page
 from media_mix_ai_lab.ui.diagnostics_page import diagnostics_page
 from media_mix_ai_lab.ui.help_content import HELP_TEXT, help_heading
+from media_mix_ai_lab.ui.influence_page import sample_influence_page
 
 NAVIGATION = (
     (
@@ -46,6 +47,7 @@ NAVIGATION = (
         "Analysis",
         (
             ("Models", ":material/model_training:"),
+            ("Sample Influence", ":material/grid_on:"),
             ("Adstock Analysis", ":material/show_chart:"),
             ("Diagnostics", ":material/analytics:"),
             ("AI Assistant", ":material/auto_awesome:"),
@@ -1116,7 +1118,9 @@ def main() -> None:
             validate_weekly_dataset(frame, mapping)
         else:
             validate_dataset(
-                frame, allow_negative_target_media=section in {"Models", "Adstock Analysis"}
+                frame,
+                allow_negative_target_media=section
+                in {"Models", "Sample Influence", "Adstock Analysis"},
             )
     except ValueError as error:
         st.error(f"Dataset validation failed: {error}")
@@ -1130,6 +1134,8 @@ def main() -> None:
         explore(frame, mapping, source["kind"])
     elif section == "Models":
         models()
+    elif section == "Sample Influence":
+        sample_influence_page()
     elif section == "Adstock Analysis":
         adstock_page()
     elif section == "Diagnostics":

@@ -42,6 +42,17 @@ accepts a weekly CSV with explicit date, target, channel, and optional control
 mapping. The **Models** section shows pre-fit eligibility and log-domain checks,
 fits OLS or strict log-log OLS, and lets you download each fit with its
 observation accounting, specification, diagnostics, and provenance as JSON.
+The **Sample Influence** page (grouped under Models in the sidebar) takes a stored
+fit, rebuilds its exact design matrix from the dataset fingerprint (refusing a
+different sample), and computes statsmodels DFBETAS, Cook's distance, leverage,
+externally studentized residuals and DFFITS for every fitted row, plus exact
+leave-one-out coefficients. It offers a DFBETAS heatmap (chronological by default),
+a ranked table with CSV/JSON download, per-coefficient plots, a residual-vs-leverage
+plot and an observation drill-down. DFBETAS measures coefficient sensitivity of one
+fitted regression to one row, not causal contribution, ROI, or a claim that a row is
+wrong; the 2/√N and 4/N guides are configurable heuristics. Nothing is removed. With
+adstock, deleting a regression row is not removing that week's spend from the history.
+
 The separate **Diagnostics** page evaluates a saved model specification using
 either a chronological holdout fraction or a date cutoff; it never shuffles or
 sorts rows. Inspect MAE, RMSE, WAPE, observed-versus-predicted outcomes, residuals
@@ -70,7 +81,7 @@ src/media_mix_ai_lab/
   data/                        Deterministic generation and nonmutating validation
   core/                        Serializable Pydantic model specifications
   modeling/                    OLS engine, future engine protocol, and result contract
-  diagnostics/                 Coefficient, model-health, and temporal diagnostics
+  diagnostics/                 Coefficient, model-health, temporal, and sample-influence diagnostics
   optimization/                Reserved for response curves and budget optimization
   ai/                          Provider-neutral conversation and typed tool contracts
 tests/                         Unit and Streamlit AppTest smoke tests
