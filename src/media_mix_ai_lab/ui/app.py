@@ -32,6 +32,7 @@ from media_mix_ai_lab.modeling.ols import (
 from media_mix_ai_lab.ui.adstock_page import adstock_page
 from media_mix_ai_lab.ui.diagnostics_page import diagnostics_page
 from media_mix_ai_lab.ui.help_content import HELP_TEXT, help_heading
+from media_mix_ai_lab.ui.response_page import response_curves_page
 
 NAVIGATION = (
     (
@@ -1093,16 +1094,6 @@ def assistant() -> None:
     st.chat_input("Conversation will be enabled in a future release", disabled=True)
 
 
-def roi() -> None:
-    st.title("ROI Analysis")
-    st.write("Channel response curves and constrained budget optimization are coming later.")
-    st.info(
-        "ROI requires a validated model, explicit assumptions, and a definition of returns. "
-        "Observed revenue divided by spend is not causal advertising ROI."
-    )
-    st.button("Estimate response curves (coming soon)", disabled=True)
-
-
 def main() -> None:
     st.set_page_config(page_title="Media Mix AI Lab", page_icon="🔬", layout="wide")
     if "dataset" not in st.session_state:
@@ -1137,4 +1128,4 @@ def main() -> None:
     elif section == "AI Assistant":
         assistant()
     else:
-        roi()
+        response_curves_page()

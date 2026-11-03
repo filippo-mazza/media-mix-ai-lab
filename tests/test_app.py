@@ -65,6 +65,27 @@ def test_workbench_sections_render_without_credentials(section):
         assert not app.exception
     elif section == "Adstock Analysis":
         assert len(app.get("plotly_chart")) == 2
+    elif section == "ROI Analysis":
+        assert any("Fit a log-log model" in item.value for item in app.info)
+
+
+def test_response_curve_renders_after_log_log_fit():
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
+    navigate(app, "Models")
+    next(select for select in app.selectbox if select.label == "Model specification").set_value(
+        "log_log"
+    ).run()
+    next(button for button in app.button if button.label == "Fit model").click().run()
+
+    navigate(app, "ROI Analysis")
+
+    assert not app.exception
+    assert any("Channel spend-response curves" in item.value for item in app.subheader)
+    assert len(app.get("plotly_chart")) == 1
+    assert any("conditional model-based" in item.value for item in app.warning)
+    assert any(
+        button.label == "Download response curve JSON" for button in app.get("download_button")
+    )
 
 
 def test_adstock_search_and_apply():
