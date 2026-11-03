@@ -57,46 +57,8 @@ class OLSModelEngine:
 
         model_data = transform_media_frame(data, config)
         accounting = _summarize_transformed_observations(model_data, config)
-        if config.kind == "log_log" and accounting.n_eligible < accounting.n_input:
-            invalid = [
-                f"{column}: {count} nonpositive value(s)"
-                for column, count in (
-                    (config.target, accounting.nonpositive_target_count),
-                    *accounting.nonpositive_media_counts.items(),
-                )
-                if count
-            ]
-            examples = []
-            for row in accounting.affected_rows[:3]:
-                label = f"row {row.row_position}"
-                if row.date is not None:
-                    label += f" (date={row.date})"
-                examples.append(label)
-            raise ModelFitError(
-                "Strict log-log requires positive outcome and media values; "
-                + "; ".join(invalid)
-                + f". Affected rows: {', '.join(examples)}. "
-                "No rows were dropped and no epsilon was added.",
-                accounting,
-            )
-
-        if config.kind == "log_log":
-            transformed_channels = [f"log({column})" for column in config.channels]
-            collisions = set(transformed_channels).intersection(config.controls)
-            if collisions:
-                raise ValueError(
-                    "Transformed media predictor names collide with selected controls: "
-                    f"{', '.join(sorted(collisions))}. Rename the conflicting columns."
-                )
-            y = np.log(model_data[config.target].astype(float)).rename(f"log({config.target})")
-            design = pd.DataFrame(index=data.index)
-            for column in config.channels:
-                design[f"log({column})"] = np.log(model_data[column].astype(float))
-            for column in config.controls:
-                design[column] = model_data[column].astype(float)
-        else:
-            y = model_data[config.target].astype(float).rename(config.target)
-            design = model_data.loc[:, features].astype(float).copy()
+        _require_log_domain(accounting, config)
+        y, design = _assemble_design(model_data, config, data.index)
 
         roles = {
             (f"log({column})" if config.kind == "log_log" else column): "media"
@@ -109,7 +71,6 @@ class OLSModelEngine:
             **{column: "original level" for column in config.controls},
         }
         if config.intercept:
-            design = sm.add_constant(design, has_constant="add")
             roles = {"const": "intercept", **roles}
 
         sample_size, parameter_count = design.shape
@@ -296,6 +257,75 @@ class OLSModelEngine:
         digest.update(json.dumps(metadata, ensure_ascii=False).encode("utf-8"))
         digest.update(pd.util.hash_pandas_object(data, index=True).to_numpy().tobytes())
         return digest.hexdigest()
+
+
+def _require_log_domain(accounting: ObservationAccounting, config: ModelConfig) -> None:
+    """Reject strict log-log inputs outside the log domain; never drop rows or add epsilon."""
+    if config.kind != "log_log" or accounting.n_eligible >= accounting.n_input:
+        return
+    invalid = [
+        f"{column}: {count} nonpositive value(s)"
+        for column, count in (
+            (config.target, accounting.nonpositive_target_count),
+            *accounting.nonpositive_media_counts.items(),
+        )
+        if count
+    ]
+    examples = []
+    for row in accounting.affected_rows[:3]:
+        label = f"row {row.row_position}"
+        if row.date is not None:
+            label += f" (date={row.date})"
+        examples.append(label)
+    raise ModelFitError(
+        "Strict log-log requires positive outcome and media values; "
+        + "; ".join(invalid)
+        + f". Affected rows: {', '.join(examples)}. "
+        "No rows were dropped and no epsilon was added.",
+        accounting,
+    )
+
+
+def _assemble_design(
+    model_data: pd.DataFrame, config: ModelConfig, index: pd.Index
+) -> tuple[pd.Series, pd.DataFrame]:
+    """Build the outcome and design matrix (with intercept) from media-transformed data."""
+    features = (*config.channels, *config.controls)
+    if config.kind == "log_log":
+        transformed_channels = [f"log({column})" for column in config.channels]
+        collisions = set(transformed_channels).intersection(config.controls)
+        if collisions:
+            raise ValueError(
+                "Transformed media predictor names collide with selected controls: "
+                f"{', '.join(sorted(collisions))}. Rename the conflicting columns."
+            )
+        y = np.log(model_data[config.target].astype(float)).rename(f"log({config.target})")
+        design = pd.DataFrame(index=index)
+        for column in config.channels:
+            design[f"log({column})"] = np.log(model_data[column].astype(float))
+        for column in config.controls:
+            design[column] = model_data[column].astype(float)
+    else:
+        y = model_data[config.target].astype(float).rename(config.target)
+        design = model_data.loc[:, features].astype(float).copy()
+    if config.intercept:
+        design = sm.add_constant(design, has_constant="add")
+    return y, design
+
+
+def build_design_matrix(
+    data: pd.DataFrame, config: ModelConfig
+) -> tuple[pd.Series, pd.DataFrame, ObservationAccounting]:
+    """Return the exact (outcome, design, accounting) a fit on `data` would use.
+
+    Applies the same strict log-domain policy and adstock transforms as `fit`;
+    never drops, sorts, imputes, or otherwise alters rows.
+    """
+    model_data = transform_media_frame(data, config)
+    accounting = _summarize_transformed_observations(model_data, config)
+    _require_log_domain(accounting, config)
+    y, design = _assemble_design(model_data, config, data.index)
+    return y, design, accounting
 
 
 def summarize_observations(data: pd.DataFrame, config: ModelConfig) -> ObservationAccounting:

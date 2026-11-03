@@ -164,8 +164,9 @@ HELP_TEXT = {
         "a split or fit infeasible."
     ),
     "influence_glossary": (
-        "Influence diagnostics are not currently computed here. DFBETAS measures how a case shifts "
-        "a coefficient; Cook's distance summarizes its joint influence; leverage measures unusual "
+        "The Sample Influence page computes these for a stored fit. "
+        "DFBETAS measures how a case shifts a coefficient; Cook's distance summarizes its joint "
+        "influence; leverage measures unusual "
         "predictor position; studentized residuals scale its outcome error. Cutoffs are "
         "heuristics, "
         "and influence is not attribution."
